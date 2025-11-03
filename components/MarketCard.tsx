@@ -1,6 +1,7 @@
 'use client';
 import { TrendingUp, TrendingDown, Clock, DollarSign } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { getCategoryColor } from '@/lib/utils/market-helpers';
 
 interface MarketCardProps {
   id: number;
@@ -13,19 +14,6 @@ interface MarketCardProps {
 
 export default function MarketCard({ id, title, probability, volume, endDate, category }: MarketCardProps) {
   const router = useRouter();
-
-  const getCategoryColor = (category: string) => {
-    const colors: { [key: string]: string } = {
-      Crypto: 'bg-purple-100 text-purple-700',
-      Technology: 'bg-blue-100 text-blue-700',
-      Space: 'bg-indigo-100 text-indigo-700',
-      Politics: 'bg-red-100 text-red-700',
-      Climate: 'bg-green-100 text-green-700',
-      Entertainment: 'bg-pink-100 text-pink-700',
-      Sports: 'bg-orange-100 text-orange-700'
-    };
-    return colors[category] || 'bg-gray-100 text-gray-700';
-  };
 
   return (
     <div 

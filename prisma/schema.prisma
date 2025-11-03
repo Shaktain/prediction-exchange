@@ -1,0 +1,123 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String?  @unique
+  walletAddress String   @unique
+  passwordHash  String?
+  usdcBalance   Decimal  @default(0)
+  lockedBalance Decimal  @default(0)
+  fiatBalance   Decimal  @default(0)
+  kycStatus     String   @default("pending")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  orders        Order[]
+  positions     Position[]
+  transactions  Transaction[]
+}
+
+model Market {
+  id              Int       @id @default(autoincrement())
+  title           String
+  description     String
+  category        String
+  status          String    @default("active")
+  resolved        Boolean   @default(false)
+  outcome         Boolean?
+  yesPrice        Decimal
+  noPrice         Decimal
+  totalVolume     Decimal   @default(0)
+  totalLiquidity  Decimal   @default(0)
+  traderCount     Int       @default(0)
+  createdAt       DateTime  @default(now())
+  endDate         DateTime
+  resolvedAt      DateTime?
+  contractAddress String?
+  orders          Order[]
+  positions       Position[]
+  trades          Trade[]
+  priceHistory    PriceHistory[]
+}
+
+model Order {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  marketId  Int
+  market    Market   @relation(fields: [marketId], references: [id])
+  side      String
+  type      String
+  price     Decimal
+  quantity  Decimal
+  filled    Decimal  @default(0)
+  remaining Decimal
+  status    String   @default("open")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  trades    Trade[]
+}
+
+model Trade {
+  id           String   @id @default(cuid())
+  marketId     Int
+  market       Market   @relation(fields: [marketId], references: [id])
+  buyOrderId   String
+  buyOrder     Order    @relation(fields: [buyOrderId], references: [id])
+  sellOrderId  String
+  buyerUserId  String
+  sellerUserId String
+  side         String
+  price        Decimal
+  quantity     Decimal
+  executedAt   DateTime @default(now())
+}
+
+model Position {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  marketId    Int
+  market      Market   @relation(fields: [marketId], references: [id])
+  yesShares   Decimal  @default(0)
+  noShares    Decimal  @default(0)
+  avgYesCost  Decimal  @default(0)
+  avgNoCost   Decimal  @default(0)
+  realizedPnL Decimal  @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, marketId])
+}
+
+model Transaction {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id])
+  type            String
+  amount          Decimal
+  currency        String
+  status          String    @default("pending")
+  stripePaymentId String?
+  circlePaymentId String?
+  txHash          String?
+  metadata        Json?
+  createdAt       DateTime  @default(now())
+  completedAt     DateTime?
+}
+
+model PriceHistory {
+  id        Int      @id @default(autoincrement())
+  marketId  Int
+  market    Market   @relation(fields: [marketId], references: [id])
+  yesPrice  Decimal
+  noPrice   Decimal
+  volume    Decimal
+  timestamp DateTime @default(now())
+}
