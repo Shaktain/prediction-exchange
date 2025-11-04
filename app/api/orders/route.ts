@@ -113,44 +113,8 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    // Auto-create/update position (for demo MVP - in production this happens during matching)
-    const existingPosition = await prisma.position.findUnique({
-      where: {
-        userId_marketId: {
-          userId,
-          marketId: parseInt(marketId)
-        }
-      }
-    });
-
-    if (existingPosition) {
-      // Update existing position
-      const currentShares = side === 'yes' ? Number(existingPosition.yesShares) : Number(existingPosition.noShares);
-      const currentCost = side === 'yes' ? Number(existingPosition.avgYesCost) : Number(existingPosition.avgNoCost);
-      const newShares = currentShares + quantity;
-      const newAvgCost = ((currentShares * currentCost) + (quantity * price)) / newShares;
-
-      await prisma.position.update({
-        where: { id: existingPosition.id },
-        data: {
-          [side === 'yes' ? 'yesShares' : 'noShares']: newShares,
-          [side === 'yes' ? 'avgYesCost' : 'avgNoCost']: newAvgCost
-        }
-      });
-    } else {
-      // Create new position
-      await prisma.position.create({
-        data: {
-          userId,
-          marketId: parseInt(marketId),
-          yesShares: side === 'yes' ? quantity : 0,
-          noShares: side === 'no' ? quantity : 0,
-          avgYesCost: side === 'yes' ? price : 0,
-          avgNoCost: side === 'no' ? price : 0,
-          realizedPnL: 0
-        }
-      });
-    }
+    // Try to match the order
+    await matchOrder(prisma, order, parseInt(marketId));
 
     return NextResponse.json({
       success: true,
@@ -225,5 +189,150 @@ export async function DELETE(request: NextRequest) {
       { error: 'Failed to cancel order' },
       { status: 500 }
     );
+  }
+}
+
+// ============================================================================
+// MATCHING ENGINE FUNCTIONS
+// ============================================================================
+
+async function matchOrder(prisma: any, newOrder: any, marketId: number) {
+  const oppositeSide = newOrder.side === 'yes' ? 'no' : 'yes';
+
+  // Get opposing orders sorted by best price first, then time
+  const opposingOrders = await prisma.order.findMany({
+    where: {
+      marketId,
+      side: oppositeSide,
+      status: { in: ['open', 'partial'] },
+      remaining: { gt: 0 }
+    },
+    orderBy: [
+      { price: 'desc' }, // Best price first
+      { createdAt: 'asc' } // Time priority
+    ]
+  });
+
+  let remainingQty = Number(newOrder.remaining);
+
+  for (const opposingOrder of opposingOrders) {
+    if (remainingQty <= 0) break;
+
+    // Check if prices cross (can match)
+    const newPrice = Number(newOrder.price);
+    const oppPrice = Number(opposingOrder.price);
+
+    // For prediction markets: YES price + NO price should equal 1
+    // Orders match if: newPrice + oppPrice >= 1
+    const pricesCross = (newPrice + oppPrice) >= 0.99; // Use 0.99 to account for rounding
+
+    if (!pricesCross) continue;
+
+    // Calculate match quantity
+    const matchQty = Math.min(remainingQty, Number(opposingOrder.remaining));
+
+    // Execute the trade at the maker's price (opposing order price)
+    const executionPrice = oppPrice;
+
+    // Create trade record
+    await prisma.trade.create({
+      data: {
+        marketId,
+        buyOrderId: newOrder.id,
+        sellOrderId: opposingOrder.id,
+        buyerUserId: newOrder.userId,
+        sellerUserId: opposingOrder.userId,
+        side: newOrder.side,
+        price: executionPrice,
+        quantity: matchQty
+      }
+    });
+
+    // Update new order
+    remainingQty -= matchQty;
+    await prisma.order.update({
+      where: { id: newOrder.id },
+      data: {
+        filled: { increment: matchQty },
+        remaining: { decrement: matchQty },
+        status: remainingQty === 0 ? 'filled' : 'partial'
+      }
+    });
+
+    // Update opposing order
+    const oppRemaining = Number(opposingOrder.remaining) - matchQty;
+    await prisma.order.update({
+      where: { id: opposingOrder.id },
+      data: {
+        filled: { increment: matchQty },
+        remaining: { decrement: matchQty },
+        status: oppRemaining === 0 ? 'filled' : 'partial'
+      }
+    });
+
+    // Update positions for both users
+    await updatePositionAfterTrade(
+      prisma,
+      newOrder.userId,
+      marketId,
+      newOrder.side,
+      matchQty,
+      executionPrice
+    );
+
+    await updatePositionAfterTrade(
+      prisma,
+      opposingOrder.userId,
+      marketId,
+      opposingOrder.side,
+      matchQty,
+      executionPrice
+    );
+  }
+}
+
+async function updatePositionAfterTrade(
+  prisma: any,
+  userId: string,
+  marketId: number,
+  side: string,
+  quantity: number,
+  price: number
+) {
+  const position = await prisma.position.findUnique({
+    where: {
+      userId_marketId: { userId, marketId }
+    }
+  });
+
+  if (position) {
+    // Update existing position
+    const field = side === 'yes' ? 'yesShares' : 'noShares';
+    const costField = side === 'yes' ? 'avgYesCost' : 'avgNoCost';
+
+    const currentShares = Number(position[field]);
+    const currentCost = Number(position[costField]);
+    const newShares = currentShares + quantity;
+    const newAvgCost = newShares > 0 ? ((currentShares * currentCost) + (quantity * price)) / newShares : 0;
+
+    await prisma.position.update({
+      where: { id: position.id },
+      data: {
+        [field]: newShares,
+        [costField]: newAvgCost
+      }
+    });
+  } else {
+    // Create new position
+    await prisma.position.create({
+      data: {
+        userId,
+        marketId,
+        yesShares: side === 'yes' ? quantity : 0,
+        noShares: side === 'no' ? quantity : 0,
+        avgYesCost: side === 'yes' ? price : 0,
+        avgNoCost: side === 'no' ? price : 0
+      }
+    });
   }
 }

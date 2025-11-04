@@ -5,6 +5,8 @@ import { ArrowLeft, TrendingUp, TrendingDown, Users, Clock, DollarSign } from 'l
 import Header from '@/components/Header';
 import { getCategoryColor } from '@/lib/utils/market-helpers';
 import { useTrade } from '@/lib/hooks/useTrade';
+import { useAccount } from 'wagmi';
+import OrderBook from '@/components/OrderBook';
 
 interface Market {
   id: number;
@@ -22,19 +24,22 @@ interface Market {
 export default function MarketPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
+  const { address, isConnected } = useAccount();
   const [market, setMarket] = useState<Market | null>(null);
   const [loading, setLoading] = useState(true);
   const [successMessage, setSuccessMessage] = useState('');
+  const [tradeType, setTradeType] = useState<'buy' | 'sell'>('buy');
+  const [orderType, setOrderType] = useState<'market' | 'limit'>('market');
+  const [limitPrice, setLimitPrice] = useState('');
+  const [isTrading, setIsTrading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const {
     amount,
     setAmount,
     side,
     setSide,
-    isTrading,
-    error,
     executeTrade,
-    isConnected,
     potentialReturn
   } = useTrade(
     market ? market.id : 0,
@@ -58,13 +63,149 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
     fetchMarket();
   }, [id]);
 
+  const executeBuy = async () => {
+    if (!isConnected || !address) {
+      setError('Please connect your wallet');
+      return;
+    }
+
+    if (!amount || parseFloat(amount) <= 0) {
+      setError('Please enter a valid number of shares');
+      return;
+    }
+
+    if (orderType === 'limit' && (!limitPrice || parseFloat(limitPrice) <= 0)) {
+      setError('Please enter a valid limit price');
+      return;
+    }
+
+    const shares = parseFloat(amount);
+    const price = orderType === 'limit' 
+      ? parseFloat(limitPrice) 
+      : (side === 'yes' ? Number(market!.yesPrice) : Number(market!.noPrice));
+
+    setIsTrading(true);
+    setError(null);
+
+    try {
+      const userResponse = await fetch('/api/users/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ walletAddress: address })
+      });
+
+      if (!userResponse.ok) {
+        throw new Error('Failed to register user');
+      }
+
+      const { userId } = await userResponse.json();
+
+      const orderResponse = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          marketId: market!.id,
+          side,
+          type: orderType,
+          price,
+          quantity: shares
+        })
+      });
+
+      if (!orderResponse.ok) {
+        const errorData = await orderResponse.json();
+        throw new Error(errorData.error || 'Failed to place order');
+      }
+
+      setAmount('');
+      setLimitPrice('');
+    } catch (err: any) {
+      console.error('Buy error:', err);
+      setError(err.message || 'Failed to execute buy');
+      throw err;
+    } finally {
+      setIsTrading(false);
+    }
+  };
+
+  const executeSell = async () => {
+    if (!isConnected || !address) {
+      setError('Please connect your wallet');
+      return;
+    }
+
+    if (!amount || parseFloat(amount) <= 0) {
+      setError('Please enter a valid number of shares');
+      return;
+    }
+
+    if (orderType === 'limit' && (!limitPrice || parseFloat(limitPrice) <= 0)) {
+      setError('Please enter a valid limit price');
+      return;
+    }
+
+    const shares = parseFloat(amount);
+    const basePrice = side === 'yes' ? Number(market!.yesPrice) : Number(market!.noPrice);
+    const price = orderType === 'limit' ? parseFloat(limitPrice) : basePrice;
+
+    setIsTrading(true);
+    setError(null);
+
+    try {
+      const userResponse = await fetch('/api/users/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ walletAddress: address })
+      });
+
+      if (!userResponse.ok) {
+        throw new Error('Failed to register user');
+      }
+
+      const { userId } = await userResponse.json();
+
+      const sellSide = side === 'yes' ? 'no' : 'yes';
+      const orderResponse = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          marketId: market!.id,
+          side: sellSide,
+          type: orderType,
+          price: orderType === 'limit' ? price : (1 - price),
+          quantity: shares
+        })
+      });
+
+      if (!orderResponse.ok) {
+        const errorData = await orderResponse.json();
+        throw new Error(errorData.error || 'Failed to place sell order');
+      }
+
+      setAmount('');
+      setLimitPrice('');
+    } catch (err: any) {
+      console.error('Sell error:', err);
+      setError(err.message || 'Failed to execute sell');
+      throw err;
+    } finally {
+      setIsTrading(false);
+    }
+  };
+
   const handleTrade = async () => {
     try {
-      await executeTrade();
-      setSuccessMessage('Order placed successfully!');
+      if (tradeType === 'sell') {
+        await executeSell();
+      } else {
+        await executeBuy();
+      }
+      setSuccessMessage(`${orderType === 'limit' ? 'Limit' : 'Market'} ${tradeType === 'buy' ? 'order' : 'sale'} placed successfully!`);
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (err) {
-      // Error already handled in useTrade hook
+      // Error already handled in functions
     }
   };
 
@@ -183,6 +324,9 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
                 <p className="text-gray-500">Chart coming soon</p>
               </div>
             </div>
+
+            {/* Order Book */}
+            <OrderBook marketId={market.id} />
           </div>
 
           {/* Trading Panel */}
@@ -210,6 +354,58 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
                     style={{ width: `${probability}%` }}
                   />
                 </div>
+              </div>
+
+              {/* Buy/Sell Toggle */}
+              <div className="grid grid-cols-2 gap-2 mb-6">
+                <button
+                  onClick={() => setTradeType('buy')}
+                  disabled={isTrading}
+                  className={`py-3 px-4 rounded-lg font-semibold transition-all ${
+                    tradeType === 'buy'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  Buy
+                </button>
+                <button
+                  onClick={() => setTradeType('sell')}
+                  disabled={isTrading}
+                  className={`py-3 px-4 rounded-lg font-semibold transition-all ${
+                    tradeType === 'sell'
+                      ? 'bg-orange-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  Sell
+                </button>
+              </div>
+
+              {/* Order Type Toggle */}
+              <div className="grid grid-cols-2 gap-2 mb-6">
+                <button
+                  onClick={() => setOrderType('market')}
+                  disabled={isTrading}
+                  className={`py-2 px-4 rounded-lg font-semibold transition-all text-sm ${
+                    orderType === 'market'
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  Market Order
+                </button>
+                <button
+                  onClick={() => setOrderType('limit')}
+                  disabled={isTrading}
+                  className={`py-2 px-4 rounded-lg font-semibold transition-all text-sm ${
+                    orderType === 'limit'
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  Limit Order
+                </button>
               </div>
 
               {/* Yes/No Buttons */}
@@ -240,6 +436,29 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
                 </button>
               </div>
 
+              {/* Limit Price Input */}
+              {orderType === 'limit' && (
+                <div className="mb-6">
+                  <label className="block text-gray-700 font-semibold mb-2">
+                    Limit Price (per share)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    max="0.99"
+                    placeholder="0.50"
+                    value={limitPrice}
+                    onChange={(e) => setLimitPrice(e.target.value)}
+                    disabled={isTrading}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Your order will only execute at this price or better
+                  </p>
+                </div>
+              )}
+
               {/* Number of Shares Input */}
               <div className="mb-6">
                 <label className="block text-gray-700 font-semibold mb-2">
@@ -255,29 +474,60 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
                 />
                 {amount && parseFloat(amount) > 0 && (
                   <div className="mt-2 text-sm text-gray-600">
-                    Cost: <span className="font-semibold text-gray-900">
-                      ${(parseFloat(amount) * (side === 'yes' ? Number(market.yesPrice) : Number(market.noPrice))).toFixed(2)} USDC
-                    </span>
+                    {tradeType === 'buy' ? (
+                      <>
+                        Cost: <span className="font-semibold text-gray-900">
+                          ${(parseFloat(amount) * (orderType === 'limit' ? (limitPrice ? parseFloat(limitPrice) : 0) : (side === 'yes' ? Number(market.yesPrice) : Number(market.noPrice)))).toFixed(2)} USDC
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        You'll receive: <span className="font-semibold text-green-600">
+                          ${(parseFloat(amount) * (orderType === 'limit' ? (limitPrice ? parseFloat(limitPrice) : 0) : (side === 'yes' ? Number(market.yesPrice) : Number(market.noPrice)))).toFixed(2)} USDC
+                        </span>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
 
               {/* Potential Return */}
               <div className="bg-blue-50 rounded-lg p-4 mb-6">
-                <div className="flex justify-between mb-2">
-                  <span className="text-gray-600">Cost</span>
-                  <span className="font-bold text-gray-900">${potentialReturn.cost.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between mb-2">
-                  <span className="text-gray-600">Potential Return</span>
-                  <span className="font-bold text-gray-900">${potentialReturn.potentialReturn.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Potential Profit</span>
-                  <span className={`font-bold ${potentialReturn.potentialProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    ${potentialReturn.potentialProfit.toFixed(2)}
-                  </span>
-                </div>
+                {tradeType === 'buy' ? (
+                  <>
+                    <div className="flex justify-between mb-2">
+                      <span className="text-gray-600">Cost</span>
+                      <span className="font-bold text-gray-900">${potentialReturn.cost.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between mb-2">
+                      <span className="text-gray-600">Potential Return</span>
+                      <span className="font-bold text-gray-900">${potentialReturn.potentialReturn.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Potential Profit</span>
+                      <span className={`font-bold ${potentialReturn.potentialProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        ${potentialReturn.potentialProfit.toFixed(2)}
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex justify-between mb-2">
+                      <span className="text-gray-600">You'll Receive</span>
+                      <span className="font-bold text-green-600">${potentialReturn.cost.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between mb-2">
+                      <span className="text-gray-600">Max Loss</span>
+                      <span className="font-bold text-red-600">
+                        ${(potentialReturn.potentialReturn - potentialReturn.cost).toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Max Profit</span>
+                      <span className="font-bold text-green-600">${potentialReturn.cost.toFixed(2)}</span>
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* Error Message */}
@@ -290,19 +540,28 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
               {/* Place Trade Button */}
               <button
                 onClick={handleTrade}
-                disabled={!isConnected || isTrading || !amount || parseFloat(amount) <= 0}
-                className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed text-white font-bold py-4 px-6 rounded-lg transition-all transform hover:scale-105 disabled:transform-none"
+                disabled={!isConnected || isTrading || !amount || parseFloat(amount) <= 0 || (orderType === 'limit' && (!limitPrice || parseFloat(limitPrice) <= 0))}
+                className={`w-full font-bold py-4 px-6 rounded-lg transition-all transform hover:scale-105 disabled:transform-none disabled:cursor-not-allowed ${
+                  tradeType === 'buy'
+                    ? 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-gray-400 disabled:to-gray-500 text-white'
+                    : 'bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700 disabled:from-gray-400 disabled:to-gray-500 text-white'
+                }`}
               >
                 {!isConnected 
                   ? 'Connect Wallet to Trade'
                   : isTrading
                   ? 'Processing...'
-                  : `Buy ${side.toUpperCase()} Shares`
+                  : `${tradeType === 'buy' ? 'Buy' : 'Sell'} ${side.toUpperCase()} Shares`
                 }
               </button>
 
               <p className="text-xs text-gray-500 text-center mt-4">
-                Demo trading with $10,000 virtual balance
+                {tradeType === 'buy' 
+                  ? orderType === 'limit' 
+                    ? 'Limit order will execute at your price or better'
+                    : 'Market order will execute immediately at current price'
+                  : 'Sell shares to receive cash now, with obligation to pay if you\'re wrong'
+                }
               </p>
             </div>
           </div>
