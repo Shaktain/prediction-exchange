@@ -18,12 +18,12 @@ export function getCategoryColor(category: string): string {
 }
 
 export function calculatePotentialReturn(
-  amount: number,
+  shares: number,
   price: number
-): { shares: number; potentialReturn: number; potentialProfit: number } {
-  const shares = amount / price;
-  const potentialReturn = shares * 1;
-  const potentialProfit = potentialReturn - amount;
+): { shares: number; cost: number; potentialReturn: number; potentialProfit: number } {
+  const cost = shares * price;
+  const potentialReturn = shares * 1; // Each share pays $1 if correct
+  const potentialProfit = potentialReturn - cost;
   
-  return { shares, potentialReturn, potentialProfit };
+  return { shares, cost, potentialReturn, potentialProfit };
 }

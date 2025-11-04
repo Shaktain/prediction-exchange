@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       userId: user.id,
-      balance: Number(user.usdcBalance)
+      balance: Number(user.usdcBalance) - Number(user.lockedBalance)
     });
   } catch (error) {
     console.error('Error registering user:', error);

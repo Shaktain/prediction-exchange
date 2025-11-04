@@ -13,6 +13,7 @@ interface Market {
   noPrice: number;
   totalVolume: number;
   endDate: string;
+  resolved: boolean;
 }
 
 export default function Home() {
@@ -20,6 +21,7 @@ export default function Home() {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [markets, setMarkets] = useState<Market[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'active' | 'resolved'>('active');
 
   // Fetch markets from API
   useEffect(() => {
@@ -37,7 +39,17 @@ export default function Home() {
     fetchMarkets();
   }, []);
 
-  const filteredMarkets = markets.filter(market => {
+  // Filter markets by active/resolved tab
+  const tabFilteredMarkets = markets.filter(market => {
+    if (activeTab === 'active') {
+      return !market.resolved;
+    } else {
+      return market.resolved;
+    }
+  });
+
+  // Then apply search and category filters
+  const filteredMarkets = tabFilteredMarkets.filter(market => {
     const matchesSearch = market.title.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = selectedCategory === 'All' || market.category === selectedCategory;
     return matchesSearch && matchesCategory;
@@ -61,18 +73,61 @@ export default function Home() {
     };
   };
 
+  const activeCount = markets.filter(m => !m.resolved).length;
+  const resolvedCount = markets.filter(m => m.resolved).length;
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       <Header />
       
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="text-center mb-12">
+        <div className="text-center mb-8">
           <h1 className="text-5xl font-bold text-gray-900 mb-4">
-            Active Prediction Markets
+            Prediction Markets
           </h1>
           <p className="text-xl text-gray-600">
             Trade on the outcome of future events using USDC
           </p>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex justify-center mb-8">
+          <div className="bg-white rounded-lg shadow-md p-1 inline-flex">
+            <button
+              onClick={() => setActiveTab('active')}
+              className={`px-6 py-3 rounded-md font-semibold transition-all ${
+                activeTab === 'active'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              Active Markets
+              {activeCount > 0 && (
+                <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${
+                  activeTab === 'active' ? 'bg-blue-500' : 'bg-gray-200'
+                }`}>
+                  {activeCount}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab('resolved')}
+              className={`px-6 py-3 rounded-md font-semibold transition-all ${
+                activeTab === 'resolved'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              Resolved Markets
+              {resolvedCount > 0 && (
+                <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${
+                  activeTab === 'resolved' ? 'bg-blue-500' : 'bg-gray-200'
+                }`}>
+                  {resolvedCount}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
 
         <FilterBar
@@ -102,12 +157,19 @@ export default function Home() {
                     volume={marketData.volume}
                     endDate={marketData.endDate}
                     category={market.category}
+                    resolved={market.resolved}
+                    outcome={market.outcome}
                   />
                 );
               })
             ) : (
               <div className="col-span-full text-center py-12">
-                <p className="text-gray-500 text-lg">No markets found matching your criteria</p>
+                <p className="text-gray-500 text-lg">
+                  {activeTab === 'active' 
+                    ? 'No active markets found matching your criteria' 
+                    : 'No resolved markets found matching your criteria'
+                  }
+                </p>
               </div>
             )}
           </div>

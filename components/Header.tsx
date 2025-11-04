@@ -1,6 +1,7 @@
 'use client';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { TrendingUp } from 'lucide-react';
+import Link from 'next/link';
 
 export default function Header() {
   return (
@@ -20,15 +21,15 @@ export default function Header() {
 
           {/* Navigation */}
           <nav className="hidden md:flex space-x-8">
-            <a href="/" className="text-gray-700 hover:text-blue-600 font-medium transition-colors">
+            <Link href="/" className="text-gray-700 hover:text-blue-600 font-medium transition-colors">
               Markets
-            </a>
-            <a href="#" className="text-gray-700 hover:text-blue-600 font-medium transition-colors">
+            </Link>
+            <Link href="/portfolio" className="text-gray-700 hover:text-blue-600 font-medium transition-colors">
               Portfolio
-            </a>
-            <a href="#" className="text-gray-700 hover:text-blue-600 font-medium transition-colors">
+            </Link>
+            <Link href="#" className="text-gray-700 hover:text-blue-600 font-medium transition-colors">
               Leaderboard
-            </a>
+            </Link>
           </nav>
 
           {/* RainbowKit Connect Button */}

@@ -12,10 +12,11 @@ export function useTrade(marketId: number, yesPrice: number, noPrice: number) {
 
   const potentialReturn = useMemo(() => {
     if (!amount || parseFloat(amount) <= 0) {
-      return { shares: 0, potentialReturn: 0, potentialProfit: 0 };
+      return { shares: 0, cost: 0, potentialReturn: 0, potentialProfit: 0 };
     }
+    const shares = parseFloat(amount);
     const price = side === 'yes' ? yesPrice : noPrice;
-    return calculatePotentialReturn(parseFloat(amount), price);
+    return calculatePotentialReturn(shares, price);
   }, [amount, side, yesPrice, noPrice]);
 
   const executeTrade = async () => {
@@ -25,9 +26,12 @@ export function useTrade(marketId: number, yesPrice: number, noPrice: number) {
     }
 
     if (!amount || parseFloat(amount) <= 0) {
-      setError('Please enter a valid amount');
+      setError('Please enter a valid number of shares');
       return;
     }
+
+    const shares = parseFloat(amount);
+    const price = side === 'yes' ? yesPrice : noPrice;
 
     setIsTrading(true);
     setError(null);
@@ -46,8 +50,7 @@ export function useTrade(marketId: number, yesPrice: number, noPrice: number) {
 
       const { userId } = await userResponse.json();
 
-      // Create order
-      const price = side === 'yes' ? yesPrice : noPrice;
+      // Create order with SHARES as quantity
       const orderResponse = await fetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -57,7 +60,7 @@ export function useTrade(marketId: number, yesPrice: number, noPrice: number) {
           side,
           type: 'market',
           price,
-          quantity: parseFloat(amount)
+          quantity: shares // Pass shares, not cost
         })
       });
 

@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/prisma';
 
 // GET all orders for a user or market
 export async function GET(request: NextRequest) {
@@ -114,6 +112,45 @@ export async function POST(request: NextRequest) {
         }
       }
     });
+
+    // Auto-create/update position (for demo MVP - in production this happens during matching)
+    const existingPosition = await prisma.position.findUnique({
+      where: {
+        userId_marketId: {
+          userId,
+          marketId: parseInt(marketId)
+        }
+      }
+    });
+
+    if (existingPosition) {
+      // Update existing position
+      const currentShares = side === 'yes' ? Number(existingPosition.yesShares) : Number(existingPosition.noShares);
+      const currentCost = side === 'yes' ? Number(existingPosition.avgYesCost) : Number(existingPosition.avgNoCost);
+      const newShares = currentShares + quantity;
+      const newAvgCost = ((currentShares * currentCost) + (quantity * price)) / newShares;
+
+      await prisma.position.update({
+        where: { id: existingPosition.id },
+        data: {
+          [side === 'yes' ? 'yesShares' : 'noShares']: newShares,
+          [side === 'yes' ? 'avgYesCost' : 'avgNoCost']: newAvgCost
+        }
+      });
+    } else {
+      // Create new position
+      await prisma.position.create({
+        data: {
+          userId,
+          marketId: parseInt(marketId),
+          yesShares: side === 'yes' ? quantity : 0,
+          noShares: side === 'no' ? quantity : 0,
+          avgYesCost: side === 'yes' ? price : 0,
+          avgNoCost: side === 'no' ? price : 0,
+          realizedPnL: 0
+        }
+      });
+    }
 
     return NextResponse.json({
       success: true,

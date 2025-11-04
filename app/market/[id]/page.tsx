@@ -240,34 +240,37 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
                 </button>
               </div>
 
-              {/* Amount Input */}
+              {/* Number of Shares Input */}
               <div className="mb-6">
                 <label className="block text-gray-700 font-semibold mb-2">
-                  Amount (USDC)
+                  Number of Shares
                 </label>
                 <input
                   type="number"
-                  placeholder="0.00"
+                  placeholder="0"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   disabled={isTrading}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
                 />
+                {amount && parseFloat(amount) > 0 && (
+                  <div className="mt-2 text-sm text-gray-600">
+                    Cost: <span className="font-semibold text-gray-900">
+                      ${(parseFloat(amount) * (side === 'yes' ? Number(market.yesPrice) : Number(market.noPrice))).toFixed(2)} USDC
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Potential Return */}
               <div className="bg-blue-50 rounded-lg p-4 mb-6">
                 <div className="flex justify-between mb-2">
-                  <span className="text-gray-600">Shares</span>
-                  <span className="font-bold text-gray-900">
-                    {potentialReturn.shares.toFixed(2)}
-                  </span>
+                  <span className="text-gray-600">Cost</span>
+                  <span className="font-bold text-gray-900">${potentialReturn.cost.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between mb-2">
                   <span className="text-gray-600">Potential Return</span>
-                  <span className="font-bold text-gray-900">
-                    ${potentialReturn.potentialReturn.toFixed(2)}
-                  </span>
+                  <span className="font-bold text-gray-900">${potentialReturn.potentialReturn.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Potential Profit</span>

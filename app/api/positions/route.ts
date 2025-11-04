@@ -1,9 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 
-const prisma = new PrismaClient();
+interface Position {
+  id: string;
+  userId: string;
+  marketId: number;
+  yesShares: any;
+  noShares: any;
+  avgYesCost: any;
+  avgNoCost: any;
+  realizedPnL: any;
+  market: {
+    id: number;
+    yesPrice: any;
+    noPrice: any;
+    resolved: boolean;
+    outcome: boolean | null;
+    [key: string]: any;
+  };
+}
 
-// GET user positions
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
@@ -24,7 +40,7 @@ export async function GET(request: NextRequest) {
     });
 
     // Calculate unrealized P&L for each position
-    const positionsWithPnL = positions.map(pos => {
+    const positionsWithPnL = positions.map((pos: Position) => {
       const market = pos.market;
       const yesShares = Number(pos.yesShares);
       const noShares = Number(pos.noShares);

@@ -1,16 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/prisma';
 
 // GET all markets
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const category = searchParams.get('category');
-    const status = searchParams.get('status') || 'active';
+    const status = searchParams.get('status');
 
-    const where: any = { status };
+    const where: any = {};
+
+    // Only filter by status if specifically requested (not by default)
+    if (status && status !== 'all') {
+      where.status = status;
+    }
+
     if (category && category !== 'All') {
       where.category = category;
     }
