@@ -43,10 +43,10 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { userId, marketId, side, type, price, quantity } = body;
+    const { userId, marketId, side, direction, type, price, quantity } = body;
 
     // Validation
-    if (!userId || !marketId || !side || !type || !price || !quantity) {
+    if (!userId || !marketId || !side || !direction || !type || !price || !quantity) {
       return NextResponse.json(
         { error: 'Missing required fields' },
         { status: 400 }
@@ -60,6 +60,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (direction !== 'buy' && direction !== 'sell') {
+      return NextResponse.json(
+        { error: 'Invalid direction. Must be buy or sell' },
+        { status: 400 }
+      );
+    }
+
     if (type !== 'limit' && type !== 'market') {
       return NextResponse.json(
         { error: 'Invalid type. Must be limit or market' },
@@ -67,7 +74,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check user has sufficient balance
+    // Check user has sufficient balance or shares
     const user = await prisma.user.findUnique({
       where: { id: userId }
     });
@@ -79,14 +86,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const cost = price * quantity;
-    const availableBalance = Number(user.usdcBalance) - Number(user.lockedBalance);
+    if (direction === 'buy') {
+      // Buying shares - need USDC balance
+      const cost = price * quantity;
+      const availableBalance = Number(user.usdcBalance) - Number(user.lockedBalance);
 
-    if (availableBalance < cost) {
-      return NextResponse.json(
-        { error: 'Insufficient balance' },
-        { status: 400 }
-      );
+      if (availableBalance < cost) {
+        return NextResponse.json(
+          { error: 'Insufficient balance' },
+          { status: 400 }
+        );
+      }
+    } else {
+      // Selling shares - lock USDC as collateral for short position
+      const cost = (1 - price) * quantity; // Cost is opposite side price
+      const availableBalance = Number(user.usdcBalance) - Number(user.lockedBalance);
+
+      if (availableBalance < cost) {
+        return NextResponse.json(
+          { error: 'Insufficient balance for short position' },
+          { status: 400 }
+        );
+      }
     }
 
     // Create order
@@ -95,6 +116,7 @@ export async function POST(request: NextRequest) {
         userId,
         marketId: parseInt(marketId),
         side,
+        direction,
         type,
         price,
         quantity,
@@ -103,15 +125,31 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    // Lock the funds
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        lockedBalance: {
-          increment: cost
+    if (direction === 'buy') {
+      // Lock the funds for buy orders
+      const cost = price * quantity;
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          lockedBalance: {
+            increment: cost
+          }
         }
-      }
-    });
+      });
+    } else {
+      // Lock the shares for sell orders
+      const field = side === 'yes' ? 'yesShares' : 'noShares';
+      await prisma.position.update({
+        where: {
+          userId_marketId: { userId, marketId: parseInt(marketId) }
+        },
+        data: {
+          [field]: {
+            decrement: quantity
+          }
+        }
+      });
+    }
 
     // Try to match the order
     await matchOrder(prisma, order, parseInt(marketId));
@@ -153,7 +191,7 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    if (order.status !== 'open') {
+    if (order.status !== 'open' && order.status !== 'partial') {
       return NextResponse.json(
         { error: 'Cannot cancel non-open order' },
         { status: 400 }
@@ -168,16 +206,34 @@ export async function DELETE(request: NextRequest) {
       }
     });
 
-    // Unlock funds
-    const lockedAmount = Number(order.price) * Number(order.remaining);
-    await prisma.user.update({
-      where: { id: order.userId },
-      data: {
-        lockedBalance: {
-          decrement: lockedAmount
+    if (order.direction === 'buy') {
+      // Unlock funds
+      const lockedAmount = Number(order.price) * Number(order.remaining);
+      await prisma.user.update({
+        where: { id: order.userId },
+        data: {
+          lockedBalance: {
+            decrement: lockedAmount
+          }
         }
-      }
-    });
+      });
+    } else {
+      // Return shares to position
+      const field = order.side === 'yes' ? 'yesShares' : 'noShares';
+      await prisma.position.update({
+        where: {
+          userId_marketId: { 
+            userId: order.userId, 
+            marketId: order.marketId 
+          }
+        },
+        data: {
+          [field]: {
+            increment: Number(order.remaining)
+          }
+        }
+      });
+    }
 
     return NextResponse.json({
       success: true,
@@ -197,20 +253,29 @@ export async function DELETE(request: NextRequest) {
 // ============================================================================
 
 async function matchOrder(prisma: any, newOrder: any, marketId: number) {
-  const oppositeSide = newOrder.side === 'yes' ? 'no' : 'yes';
+  // Buy orders match with sell orders on the SAME side
+  // Sell orders match with buy orders on the SAME side
+  
+  const oppositeDirection = newOrder.direction === 'buy' ? 'sell' : 'buy';
 
-  // Get opposing orders sorted by best price first, then time
+  // Get opposing orders (same side, opposite direction)
   const opposingOrders = await prisma.order.findMany({
     where: {
       marketId,
-      side: oppositeSide,
+      side: newOrder.side, // SAME side (yes matches with yes, no with no)
+      direction: oppositeDirection, // OPPOSITE direction (buy matches with sell)
       status: { in: ['open', 'partial'] },
       remaining: { gt: 0 }
     },
-    orderBy: [
-      { price: 'desc' }, // Best price first
-      { createdAt: 'asc' } // Time priority
-    ]
+    orderBy: newOrder.direction === 'buy' 
+      ? [
+          { price: 'asc' },    // Buy orders want lowest sell prices first
+          { createdAt: 'asc' }
+        ]
+      : [
+          { price: 'desc' },   // Sell orders want highest buy prices first
+          { createdAt: 'asc' }
+        ]
   });
 
   let remainingQty = Number(newOrder.remaining);
@@ -218,30 +283,39 @@ async function matchOrder(prisma: any, newOrder: any, marketId: number) {
   for (const opposingOrder of opposingOrders) {
     if (remainingQty <= 0) break;
 
-    // Check if prices cross (can match)
     const newPrice = Number(newOrder.price);
     const oppPrice = Number(opposingOrder.price);
 
-    // For prediction markets: YES price + NO price should equal 1
-    // Orders match if: newPrice + oppPrice >= 1
-    const pricesCross = (newPrice + oppPrice) >= 0.99; // Use 0.99 to account for rounding
+    // Check if prices cross (can match)
+    let pricesCross = false;
+    if (newOrder.direction === 'buy') {
+      // Buy order: willing to pay newPrice, seller asking oppPrice
+      pricesCross = newPrice >= oppPrice;
+    } else {
+      // Sell order: willing to accept newPrice, buyer offering oppPrice
+      pricesCross = oppPrice >= newPrice;
+    }
 
     if (!pricesCross) continue;
 
     // Calculate match quantity
     const matchQty = Math.min(remainingQty, Number(opposingOrder.remaining));
 
-    // Execute the trade at the maker's price (opposing order price)
+    // Execute at maker's price (opposing order price)
     const executionPrice = oppPrice;
+
+    // Determine buyer and seller
+    const buyOrder = newOrder.direction === 'buy' ? newOrder : opposingOrder;
+    const sellOrder = newOrder.direction === 'sell' ? newOrder : opposingOrder;
 
     // Create trade record
     await prisma.trade.create({
       data: {
         marketId,
-        buyOrderId: newOrder.id,
-        sellOrderId: opposingOrder.id,
-        buyerUserId: newOrder.userId,
-        sellerUserId: opposingOrder.userId,
+        buyOrderId: buyOrder.id,
+        sellOrderId: sellOrder.id,
+        buyerUserId: buyOrder.userId,
+        sellerUserId: sellOrder.userId,
         side: newOrder.side,
         price: executionPrice,
         quantity: matchQty
@@ -270,28 +344,28 @@ async function matchOrder(prisma: any, newOrder: any, marketId: number) {
       }
     });
 
-    // Update positions for both users
-    await updatePositionAfterTrade(
+    // Handle settlements
+    await settleTradeForBuyer(
       prisma,
-      newOrder.userId,
+      buyOrder.userId,
       marketId,
       newOrder.side,
       matchQty,
       executionPrice
     );
 
-    await updatePositionAfterTrade(
+    await settleTradeForSeller(
       prisma,
-      opposingOrder.userId,
+      sellOrder.userId,
       marketId,
-      opposingOrder.side,
+      newOrder.side,
       matchQty,
       executionPrice
     );
   }
 }
 
-async function updatePositionAfterTrade(
+async function settleTradeForBuyer(
   prisma: any,
   userId: string,
   marketId: number,
@@ -299,21 +373,33 @@ async function updatePositionAfterTrade(
   quantity: number,
   price: number
 ) {
+  const cost = quantity * price;
+
+  // Deduct locked balance
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      lockedBalance: { decrement: cost }
+    }
+  });
+
+  // Add shares to position
   const position = await prisma.position.findUnique({
     where: {
       userId_marketId: { userId, marketId }
     }
   });
 
-  if (position) {
-    // Update existing position
-    const field = side === 'yes' ? 'yesShares' : 'noShares';
-    const costField = side === 'yes' ? 'avgYesCost' : 'avgNoCost';
+  const field = side === 'yes' ? 'yesShares' : 'noShares';
+  const costField = side === 'yes' ? 'avgYesCost' : 'avgNoCost';
 
+  if (position) {
     const currentShares = Number(position[field]);
     const currentCost = Number(position[costField]);
     const newShares = currentShares + quantity;
-    const newAvgCost = newShares > 0 ? ((currentShares * currentCost) + (quantity * price)) / newShares : 0;
+    const newAvgCost = newShares > 0 
+      ? ((currentShares * currentCost) + (quantity * price)) / newShares 
+      : 0;
 
     await prisma.position.update({
       where: { id: position.id },
@@ -323,7 +409,6 @@ async function updatePositionAfterTrade(
       }
     });
   } else {
-    // Create new position
     await prisma.position.create({
       data: {
         userId,
@@ -335,4 +420,26 @@ async function updatePositionAfterTrade(
       }
     });
   }
+}
+
+async function settleTradeForSeller(
+  prisma: any,
+  userId: string,
+  marketId: number,
+  side: string,
+  quantity: number,
+  price: number
+) {
+  const proceeds = quantity * price;
+
+  // Add proceeds to balance
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      usdcBalance: { increment: proceeds }
+    }
+  });
+
+  // Shares were already deducted when sell order was placed
+  // No need to touch position here
 }

@@ -8,25 +8,37 @@ interface OrderLevel {
   orderCount: number;
 }
 
-interface OrderBookProps {
-  marketId: number;
+interface OrderBookData {
+  yesBids: OrderLevel[];
+  yesAsks: OrderLevel[];
+  noBids: OrderLevel[];
+  noAsks: OrderLevel[];
 }
 
-export default function OrderBook({ marketId }: OrderBookProps) {
-  const [orderBook, setOrderBook] = useState<{
-    yes: OrderLevel[];
-    no: OrderLevel[];
-  }>({ yes: [], no: [] });
+interface OrderBookProps {
+  marketId: number;
+  selectedSide?: 'yes' | 'no';
+}
+
+export default function OrderBook({ marketId, selectedSide = 'yes' }: OrderBookProps) {
+  const [orderBook, setOrderBook] = useState<OrderBookData>({
+    yesBids: [],
+    yesAsks: [],
+    noBids: [],
+    noAsks: []
+  });
   const [loading, setLoading] = useState(true);
+  const [viewSide, setViewSide] = useState<'yes' | 'no'>(selectedSide);
 
   useEffect(() => {
     fetchOrderBook();
-    
-    // Refresh every 2 seconds
     const interval = setInterval(fetchOrderBook, 2000);
-    
     return () => clearInterval(interval);
   }, [marketId]);
+
+  useEffect(() => {
+    setViewSide(selectedSide);
+  }, [selectedSide]);
 
   async function fetchOrderBook() {
     try {
@@ -48,19 +60,52 @@ export default function OrderBook({ marketId }: OrderBookProps) {
     );
   }
 
-  const maxYesQuantity = Math.max(...orderBook.yes.map(o => o.totalQuantity), 1);
-  const maxNoQuantity = Math.max(...orderBook.no.map(o => o.totalQuantity), 1);
+  const bids = viewSide === 'yes' ? orderBook.yesBids : orderBook.noBids;
+  const asks = viewSide === 'yes' ? orderBook.yesAsks : orderBook.noAsks;
+  
+  const maxBidQuantity = Math.max(...bids.map(o => o.totalQuantity), 1);
+  const maxAskQuantity = Math.max(...asks.map(o => o.totalQuantity), 1);
+
+  const spread = calculateSpread(bids, asks);
+  const totalDepth = getTotalDepth(bids, asks);
 
   return (
     <div className="bg-white rounded-xl shadow-lg p-6">
-      <h3 className="text-lg font-bold text-gray-900 mb-4">Order Book</h3>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-bold text-gray-900">Order Book</h3>
+        
+        <div className="flex gap-2">
+          <button
+            onClick={() => setViewSide('yes')}
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              viewSide === 'yes'
+                ? 'bg-green-100 text-green-700'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            YES Book
+          </button>
+          <button
+            onClick={() => setViewSide('no')}
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              viewSide === 'no'
+                ? 'bg-red-100 text-red-700'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            NO Book
+          </button>
+        </div>
+      </div>
 
       <div className="grid grid-cols-2 gap-6">
-        {/* YES Bids */}
+        {/* ASKS (Sell Orders) */}
         <div>
           <div className="flex items-center gap-2 mb-3">
-            <TrendingUp className="w-4 h-4 text-green-600" />
-            <span className="font-semibold text-green-600">YES Bids</span>
+            <TrendingUp className={`w-4 h-4 ${viewSide === 'yes' ? 'text-green-600' : 'text-red-600'}`} />
+            <span className={`font-semibold ${viewSide === 'yes' ? 'text-green-600' : 'text-red-600'}`}>
+              {viewSide === 'yes' ? 'YES' : 'NO'} Asks (Sell)
+            </span>
           </div>
 
           <div className="space-y-1">
@@ -70,21 +115,19 @@ export default function OrderBook({ marketId }: OrderBookProps) {
               <div className="text-right">Orders</div>
             </div>
 
-            {orderBook.yes.length === 0 ? (
-              <div className="text-sm text-gray-400 text-center py-4">No bids</div>
+            {asks.length === 0 ? (
+              <div className="text-sm text-gray-400 text-center py-4">No asks</div>
             ) : (
-              orderBook.yes.slice(0, 10).map((level, idx) => (
+              [...asks].reverse().slice(0, 10).map((level, idx) => (
                 <div key={idx} className="relative">
-                  {/* Depth bar */}
                   <div 
-                    className="absolute inset-0 bg-green-50 opacity-50"
-                    style={{ width: `${(level.totalQuantity / maxYesQuantity) * 100}%` }}
+                    className={`absolute inset-0 ${viewSide === 'yes' ? 'bg-green-50' : 'bg-red-50'} opacity-50`}
+                    style={{ width: `${(level.totalQuantity / maxAskQuantity) * 100}%` }}
                   />
                   
-                  {/* Order data */}
                   <div className="relative grid grid-cols-3 text-sm py-1">
-                    <div className="font-medium text-green-600">
-                      ${level.price.toFixed(2)}
+                    <div className={`font-medium ${viewSide === 'yes' ? 'text-green-600' : 'text-red-600'}`}>
+                      ${level.price.toFixed(3)}
                     </div>
                     <div className="text-right text-gray-900">
                       {level.totalQuantity.toFixed(0)}
@@ -99,11 +142,13 @@ export default function OrderBook({ marketId }: OrderBookProps) {
           </div>
         </div>
 
-        {/* NO Asks */}
+        {/* BIDS (Buy Orders) */}
         <div>
           <div className="flex items-center gap-2 mb-3">
-            <TrendingDown className="w-4 h-4 text-red-600" />
-            <span className="font-semibold text-red-600">NO Asks</span>
+            <TrendingDown className={`w-4 h-4 ${viewSide === 'yes' ? 'text-green-600' : 'text-red-600'}`} />
+            <span className={`font-semibold ${viewSide === 'yes' ? 'text-green-600' : 'text-red-600'}`}>
+              {viewSide === 'yes' ? 'YES' : 'NO'} Bids (Buy)
+            </span>
           </div>
 
           <div className="space-y-1">
@@ -113,21 +158,19 @@ export default function OrderBook({ marketId }: OrderBookProps) {
               <div className="text-right">Orders</div>
             </div>
 
-            {orderBook.no.length === 0 ? (
-              <div className="text-sm text-gray-400 text-center py-4">No asks</div>
+            {bids.length === 0 ? (
+              <div className="text-sm text-gray-400 text-center py-4">No bids</div>
             ) : (
-              orderBook.no.slice(0, 10).map((level, idx) => (
+              bids.slice(0, 10).map((level, idx) => (
                 <div key={idx} className="relative">
-                  {/* Depth bar */}
                   <div 
-                    className="absolute inset-0 bg-red-50 opacity-50"
-                    style={{ width: `${(level.totalQuantity / maxNoQuantity) * 100}%` }}
+                    className={`absolute inset-0 ${viewSide === 'yes' ? 'bg-green-50' : 'bg-red-50'} opacity-50`}
+                    style={{ width: `${(level.totalQuantity / maxBidQuantity) * 100}%` }}
                   />
                   
-                  {/* Order data */}
                   <div className="relative grid grid-cols-3 text-sm py-1">
-                    <div className="font-medium text-red-600">
-                      ${level.price.toFixed(2)}
+                    <div className={`font-medium ${viewSide === 'yes' ? 'text-green-600' : 'text-red-600'}`}>
+                      ${level.price.toFixed(3)}
                     </div>
                     <div className="text-right text-gray-900">
                       {level.totalQuantity.toFixed(0)}
@@ -148,13 +191,13 @@ export default function OrderBook({ marketId }: OrderBookProps) {
           <div>
             <span className="text-gray-500">Spread: </span>
             <span className="font-semibold">
-              ${calculateSpread(orderBook).toFixed(3)}
+              ${spread.toFixed(4)}
             </span>
           </div>
           <div className="text-right">
             <span className="text-gray-500">Total Depth: </span>
             <span className="font-semibold">
-              {(getTotalDepth(orderBook)).toFixed(0)} shares
+              {totalDepth.toFixed(0)} shares
             </span>
           </div>
         </div>
@@ -163,17 +206,15 @@ export default function OrderBook({ marketId }: OrderBookProps) {
   );
 }
 
-function calculateSpread(orderBook: { yes: OrderLevel[]; no: OrderLevel[] }): number {
-  if (orderBook.yes.length === 0 || orderBook.no.length === 0) return 0;
-  
-  const bestYes = orderBook.yes[0].price;
-  const bestNo = orderBook.no[0].price;
-  
-  return Math.abs((1 - bestYes) - bestNo);
+function calculateSpread(bids: OrderLevel[], asks: OrderLevel[]): number {
+  if (bids.length === 0 || asks.length === 0) return 0;
+  const bestBid = bids[0].price;
+  const bestAsk = asks[asks.length - 1]?.price || asks[0].price;
+  return Math.abs(bestAsk - bestBid);
 }
 
-function getTotalDepth(orderBook: { yes: OrderLevel[]; no: OrderLevel[] }): number {
-  const yesDepth = orderBook.yes.reduce((sum, level) => sum + level.totalQuantity, 0);
-  const noDepth = orderBook.no.reduce((sum, level) => sum + level.totalQuantity, 0);
-  return yesDepth + noDepth;
+function getTotalDepth(bids: OrderLevel[], asks: OrderLevel[]): number {
+  const bidDepth = bids.reduce((sum, level) => sum + level.totalQuantity, 0);
+  const askDepth = asks.reduce((sum, level) => sum + level.totalQuantity, 0);
+  return bidDepth + askDepth;
 }

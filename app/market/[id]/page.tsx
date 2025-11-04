@@ -1,5 +1,5 @@
 'use client';
-import { use, useState, useEffect } from 'react';
+import { use, useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, TrendingUp, TrendingDown, Users, Clock, DollarSign } from 'lucide-react';
 import Header from '@/components/Header';
@@ -33,6 +33,7 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
   const [limitPrice, setLimitPrice] = useState('');
   const [isTrading, setIsTrading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [orderBookData, setOrderBookData] = useState<any>(null);
 
   const {
     amount,
@@ -54,6 +55,13 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
         const data = await response.json();
         const foundMarket = data.markets.find((m: Market) => m.id === parseInt(id));
         setMarket(foundMarket || null);
+        
+        // Fetch order book
+        if (foundMarket) {
+          const obResponse = await fetch(`/api/orderbook?marketId=${foundMarket.id}`);
+          const obData = await obResponse.json();
+          setOrderBookData(obData.orderBook);
+        }
       } catch (error) {
         console.error('Error fetching market:', error);
       } finally {
@@ -61,7 +69,113 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
       }
     }
     fetchMarket();
-  }, [id]);
+    
+    // Refresh order book every 2 seconds
+    const interval = setInterval(async () => {
+      if (market) {
+        const obResponse = await fetch(`/api/orderbook?marketId=${market.id}`);
+        const obData = await obResponse.json();
+        setOrderBookData(obData.orderBook);
+      }
+    }, 2000);
+    
+    return () => clearInterval(interval);
+  }, [id, market?.id]);
+
+  // Cleanup success message
+  useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => setSuccessMessage(''), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage]);
+
+  // Helper function to register user
+  const registerUser = async () => {
+    const userResponse = await fetch('/api/users/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ walletAddress: address })
+    });
+    if (!userResponse.ok) throw new Error('Failed to register user');
+    return await userResponse.json();
+  };
+
+  // Calculate live prices from order book - UPDATED VERSION
+  const getLivePrices = () => {
+    if (!orderBookData) return { 
+      yesPrice: '-', 
+      noPrice: '-', 
+      yesProbability: '-', 
+      noProbability: '-',
+      yesMid: '-',
+      noMid: '-'
+    };
+    
+    // Best YES bid (highest buy price)
+    const yesBestBid = orderBookData.yesBids?.[0]?.price;
+    // Best YES ask (lowest sell price)
+    const yesBestAsk = orderBookData.yesAsks?.[orderBookData.yesAsks.length - 1]?.price;
+    
+    // Best NO bid (highest buy price)
+    const noBestBid = orderBookData.noBids?.[0]?.price;
+    // Best NO ask (lowest sell price)
+    const noBestAsk = orderBookData.noAsks?.[orderBookData.noAsks.length - 1]?.price;
+    
+    // If buying: show ask (what you pay)
+    // If selling: show bid (what you receive)
+    const yesPrice = tradeType === 'buy' ? yesBestAsk : yesBestBid;
+    const noPrice = tradeType === 'buy' ? noBestAsk : noBestBid;
+    
+    // Midpoint for probability
+    const yesMid = yesBestBid && yesBestAsk ? ((yesBestBid + yesBestAsk) / 2) : (yesBestBid || yesBestAsk || null);
+    const noMid = noBestBid && noBestAsk ? ((noBestBid + noBestAsk) / 2) : (noBestBid || noBestAsk || null);
+    
+    return {
+      yesPrice: yesPrice ? `$${yesPrice.toFixed(2)}` : '-',
+      noPrice: noPrice ? `$${noPrice.toFixed(2)}` : '-',
+      yesProbability: yesMid ? `${Math.round(yesMid * 100)}%` : '-',
+      noProbability: noMid ? `${Math.round(noMid * 100)}%` : '-',
+      yesMid: yesMid ? `$${yesMid.toFixed(2)}` : '-',
+      noMid: noMid ? `$${noMid.toFixed(2)}` : '-'
+    };
+  };
+
+  const livePrices = getLivePrices();
+
+  // Helper function to get current price
+  const getCurrentPrice = () => {
+    if (orderType === 'limit' && limitPrice) {
+      return parseFloat(limitPrice);
+    }
+    const priceString = side === 'yes' ? livePrices.yesPrice : livePrices.noPrice;
+    if (priceString === '-') {
+      return side === 'yes' ? Number(market!.yesPrice) : Number(market!.noPrice);
+    }
+    return parseFloat(priceString.replace('$', ''));
+  };
+
+  // Validation helper
+  const validateTradeInputs = () => {
+    if (!amount || parseFloat(amount) <= 0) {
+      setError('Please enter a valid number of shares');
+      return false;
+    }
+
+    if (orderType === 'limit') {
+      if (!limitPrice || parseFloat(limitPrice) <= 0) {
+        setError('Please enter a valid limit price');
+        return false;
+      }
+      const numPrice = parseFloat(limitPrice);
+      if (numPrice < 0.01 || numPrice > 0.99) {
+        setError('Limit price must be between $0.01 and $0.99');
+        return false;
+      }
+    }
+
+    return true;
+  };
 
   const executeBuy = async () => {
     if (!isConnected || !address) {
@@ -69,36 +183,16 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
       return;
     }
 
-    if (!amount || parseFloat(amount) <= 0) {
-      setError('Please enter a valid number of shares');
-      return;
-    }
-
-    if (orderType === 'limit' && (!limitPrice || parseFloat(limitPrice) <= 0)) {
-      setError('Please enter a valid limit price');
-      return;
-    }
+    if (!validateTradeInputs()) return;
 
     const shares = parseFloat(amount);
-    const price = orderType === 'limit' 
-      ? parseFloat(limitPrice) 
-      : (side === 'yes' ? Number(market!.yesPrice) : Number(market!.noPrice));
+    const price = getCurrentPrice();
 
     setIsTrading(true);
     setError(null);
 
     try {
-      const userResponse = await fetch('/api/users/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress: address })
-      });
-
-      if (!userResponse.ok) {
-        throw new Error('Failed to register user');
-      }
-
-      const { userId } = await userResponse.json();
+      const { userId } = await registerUser();
 
       const orderResponse = await fetch('/api/orders', {
         method: 'POST',
@@ -107,6 +201,7 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
           userId,
           marketId: market!.id,
           side,
+          direction: 'buy',
           type: orderType,
           price,
           quantity: shares
@@ -135,46 +230,27 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
       return;
     }
 
-    if (!amount || parseFloat(amount) <= 0) {
-      setError('Please enter a valid number of shares');
-      return;
-    }
-
-    if (orderType === 'limit' && (!limitPrice || parseFloat(limitPrice) <= 0)) {
-      setError('Please enter a valid limit price');
-      return;
-    }
+    if (!validateTradeInputs()) return;
 
     const shares = parseFloat(amount);
-    const basePrice = side === 'yes' ? Number(market!.yesPrice) : Number(market!.noPrice);
-    const price = orderType === 'limit' ? parseFloat(limitPrice) : basePrice;
+    const price = getCurrentPrice();
 
     setIsTrading(true);
     setError(null);
 
     try {
-      const userResponse = await fetch('/api/users/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress: address })
-      });
+      const { userId } = await registerUser();
 
-      if (!userResponse.ok) {
-        throw new Error('Failed to register user');
-      }
-
-      const { userId } = await userResponse.json();
-
-      const sellSide = side === 'yes' ? 'no' : 'yes';
       const orderResponse = await fetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId,
           marketId: market!.id,
-          side: sellSide,
+          side,
+          direction: 'sell',
           type: orderType,
-          price: orderType === 'limit' ? price : (1 - price),
+          price,
           quantity: shares
         })
       });
@@ -203,7 +279,6 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
         await executeBuy();
       }
       setSuccessMessage(`${orderType === 'limit' ? 'Limit' : 'Market'} ${tradeType === 'buy' ? 'order' : 'sale'} placed successfully!`);
-      setTimeout(() => setSuccessMessage(''), 3000);
     } catch (err) {
       // Error already handled in functions
     }
@@ -238,7 +313,9 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
     );
   }
 
-  const probability = Math.round(Number(market.yesPrice) * 100);
+  const probability = livePrices.yesProbability !== '-' 
+    ? parseInt(livePrices.yesProbability) 
+    : Math.round(Number(market.yesPrice) * 100);
   const volume = `$${(Number(market.totalVolume) / 1000).toFixed(1)}K`;
   const liquidity = `$${(Number(market.totalLiquidity) / 1000).toFixed(1)}K`;
   const endDate = new Date(market.endDate).toLocaleDateString('en-US', {
@@ -250,7 +327,6 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       <Header />
-      
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <button
           onClick={() => router.push('/')}
@@ -344,16 +420,18 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
               <div className="mb-6">
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-gray-600">Current Probability</span>
-                  <span className="text-3xl font-bold text-blue-600">{probability}%</span>
+                  <span className="text-3xl font-bold text-blue-600">{livePrices.yesProbability}</span>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-3">
-                  <div
-                    className={`h-3 rounded-full ${
-                      probability >= 50 ? 'bg-green-500' : 'bg-red-500'
-                    }`}
-                    style={{ width: `${probability}%` }}
-                  />
-                </div>
+                {livePrices.yesProbability !== '-' && (
+                  <div className="w-full bg-gray-200 rounded-full h-3">
+                    <div
+                      className={`h-3 rounded-full ${
+                        parseInt(livePrices.yesProbability) >= 50 ? 'bg-green-500' : 'bg-red-500'
+                      }`}
+                      style={{ width: livePrices.yesProbability }}
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Buy/Sell Toggle */}
@@ -420,7 +498,7 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
                   } disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
                   <div className="text-sm mb-1">YES</div>
-                  <div className="text-2xl">${Number(market.yesPrice).toFixed(2)}</div>
+                  <div className="text-2xl">{livePrices.yesPrice}</div>
                 </button>
                 <button
                   onClick={() => setSide('no')}
@@ -432,8 +510,13 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
                   } disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
                   <div className="text-sm mb-1">NO</div>
-                  <div className="text-2xl">${Number(market.noPrice).toFixed(2)}</div>
+                  <div className="text-2xl">{livePrices.noPrice}</div>
                 </button>
+              </div>
+
+              {/* Midpoint Display */}
+              <div className="text-xs text-gray-500 text-center mb-4">
+                Midpoint: YES {livePrices.yesMid} | NO {livePrices.noMid}
               </div>
 
               {/* Limit Price Input */}
@@ -477,13 +560,13 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
                     {tradeType === 'buy' ? (
                       <>
                         Cost: <span className="font-semibold text-gray-900">
-                          ${(parseFloat(amount) * (orderType === 'limit' ? (limitPrice ? parseFloat(limitPrice) : 0) : (side === 'yes' ? Number(market.yesPrice) : Number(market.noPrice)))).toFixed(2)} USDC
+                          ${(parseFloat(amount) * getCurrentPrice()).toFixed(2)} USDC
                         </span>
                       </>
                     ) : (
                       <>
                         You'll receive: <span className="font-semibold text-green-600">
-                          ${(parseFloat(amount) * (orderType === 'limit' ? (limitPrice ? parseFloat(limitPrice) : 0) : (side === 'yes' ? Number(market.yesPrice) : Number(market.noPrice)))).toFixed(2)} USDC
+                          ${(parseFloat(amount) * getCurrentPrice()).toFixed(2)} USDC
                         </span>
                       </>
                     )}
@@ -493,41 +576,49 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
 
               {/* Potential Return */}
               <div className="bg-blue-50 rounded-lg p-4 mb-6">
-                {tradeType === 'buy' ? (
-                  <>
-                    <div className="flex justify-between mb-2">
-                      <span className="text-gray-600">Cost</span>
-                      <span className="font-bold text-gray-900">${potentialReturn.cost.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between mb-2">
-                      <span className="text-gray-600">Potential Return</span>
-                      <span className="font-bold text-gray-900">${potentialReturn.potentialReturn.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Potential Profit</span>
-                      <span className={`font-bold ${potentialReturn.potentialProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        ${potentialReturn.potentialProfit.toFixed(2)}
-                      </span>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="flex justify-between mb-2">
-                      <span className="text-gray-600">You'll Receive</span>
-                      <span className="font-bold text-green-600">${potentialReturn.cost.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between mb-2">
-                      <span className="text-gray-600">Max Loss</span>
-                      <span className="font-bold text-red-600">
-                        ${(potentialReturn.potentialReturn - potentialReturn.cost).toFixed(2)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Max Profit</span>
-                      <span className="font-bold text-green-600">${potentialReturn.cost.toFixed(2)}</span>
-                    </div>
-                  </>
-                )}
+                {(() => {
+                  const currentPrice = getCurrentPrice();
+                  const shares = parseFloat(amount) || 0;
+                  const cost = shares * currentPrice;
+                  const potentialReturn = shares * 1.0;
+                  const profit = potentialReturn - cost;
+
+                  return tradeType === 'buy' ? (
+                    <>
+                      <div className="flex justify-between mb-2">
+                        <span className="text-gray-600">Cost</span>
+                        <span className="font-bold text-gray-900">${cost.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between mb-2">
+                        <span className="text-gray-600">Potential Return</span>
+                        <span className="font-bold text-gray-900">${potentialReturn.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Potential Profit</span>
+                        <span className={`font-bold ${profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          ${profit.toFixed(2)}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex justify-between mb-2">
+                        <span className="text-gray-600">You'll Receive</span>
+                        <span className="font-bold text-green-600">${cost.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between mb-2">
+                        <span className="text-gray-600">Max Loss</span>
+                        <span className="font-bold text-red-600">
+                          ${(shares * (1 - currentPrice)).toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Max Profit</span>
+                        <span className="font-bold text-green-600">${cost.toFixed(2)}</span>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Error Message */}
@@ -547,7 +638,7 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
                     : 'bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700 disabled:from-gray-400 disabled:to-gray-500 text-white'
                 }`}
               >
-                {!isConnected 
+                {!isConnected
                   ? 'Connect Wallet to Trade'
                   : isTrading
                   ? 'Processing...'
@@ -556,8 +647,8 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
               </button>
 
               <p className="text-xs text-gray-500 text-center mt-4">
-                {tradeType === 'buy' 
-                  ? orderType === 'limit' 
+                {tradeType === 'buy'
+                  ? orderType === 'limit'
                     ? 'Limit order will execute at your price or better'
                     : 'Market order will execute immediately at current price'
                   : 'Sell shares to receive cash now, with obligation to pay if you\'re wrong'
