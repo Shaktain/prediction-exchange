@@ -7,6 +7,7 @@ import { getCategoryColor } from '@/lib/utils/market-helpers';
 import { useTrade } from '@/lib/hooks/useTrade';
 import { useAccount } from 'wagmi';
 import OrderBook from '@/components/OrderBook';
+import PriceChart from '@/components/PriceChart';
 
 interface Market {
   id: number;
@@ -394,12 +395,7 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
               </div>
             </div>
 
-            <div className="bg-white rounded-xl shadow-lg p-8">
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">Probability Over Time</h2>
-              <div className="h-64 bg-gradient-to-br from-blue-50 to-purple-50 rounded-lg flex items-center justify-center">
-                <p className="text-gray-500">Chart coming soon</p>
-              </div>
-            </div>
+            <PriceChart marketId={market.id} side={side} />
 
             {/* Order Book */}
             <OrderBook marketId={market.id} />
