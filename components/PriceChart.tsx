@@ -87,6 +87,7 @@ export default function PriceChart({ marketId, side }: PriceChartProps) {
               stroke={side === 'yes' ? '#10b981' : '#ef4444'}
               strokeWidth={2}
               dot={false}
+              isAnimationActive={false}
             />
           </LineChart>
         </ResponsiveContainer>

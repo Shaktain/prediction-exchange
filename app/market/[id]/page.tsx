@@ -70,18 +70,20 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
       }
     }
     fetchMarket();
-    
-    // Refresh order book every 2 seconds
+  }, [id]);
+
+  // Separate polling for order book only
+  useEffect(() => {
+    if (!market) return;
+
     const interval = setInterval(async () => {
-      if (market) {
-        const obResponse = await fetch(`/api/orderbook?marketId=${market.id}`);
-        const obData = await obResponse.json();
-        setOrderBookData(obData.orderBook);
-      }
+      const obResponse = await fetch(`/api/orderbook?marketId=${market.id}`);
+      const obData = await obResponse.json();
+      setOrderBookData(obData.orderBook);
     }, 2000);
-    
+
     return () => clearInterval(interval);
-  }, [id, market?.id]);
+  }, [market?.id]);
 
   // Cleanup success message
   useEffect(() => {
