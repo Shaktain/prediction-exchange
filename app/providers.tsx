@@ -3,13 +3,13 @@
 import '@rainbow-me/rainbowkit/styles.css';
 import { getDefaultConfig, RainbowKitProvider } from '@rainbow-me/rainbowkit';
 import { WagmiProvider } from 'wagmi';
-import { mainnet, polygon, optimism, arbitrum, base } from 'wagmi/chains';
+import { mainnet, polygon, optimism, arbitrum, base, baseSepolia } from 'wagmi/chains';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 
 const config = getDefaultConfig({
   appName: 'Prediction Exchange',
-  projectId: '7d65eff474d477ebf434646be6d269f4', // Using temporary public ID
-  chains: [mainnet, polygon, optimism, arbitrum, base],
+  projectId: '7d65eff474d477ebf434646be6d269f4',
+  chains: [baseSepolia, base, mainnet, polygon, optimism, arbitrum], // Put baseSepolia first for testing
   ssr: true,
 });
 

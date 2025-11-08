@@ -5,11 +5,13 @@ import { useAccount } from 'wagmi';
 import { ChevronDown, Wallet, Trophy } from 'lucide-react';
 import { getOnChainBalance } from '@/lib/blockchain/vault';
 import DepositModal from '@/components/DepositModal';
+import WithdrawModal from '@/components/WithdrawModal';
 
 export default function Header() {
   const { address, isConnected } = useAccount();
   const [showBalanceMenu, setShowBalanceMenu] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
+  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [onChainBalance, setOnChainBalance] = useState<number>(0);
   const [offChainBalance, setOffChainBalance] = useState<number>(0);
   const [loading, setLoading] = useState(false);
@@ -36,6 +38,12 @@ export default function Header() {
         body: JSON.stringify({ walletAddress: address })
       });
       const data = await response.json();
+
+      // Calculate available balance (total - locked)
+      const totalBalance = Number(data.user?.usdcBalance || 0);
+      const lockedBalance = Number(data.user?.lockedBalance || 0);
+      const availableBalance = totalBalance - lockedBalance;
+      
       setOffChainBalance(Number(data.user?.usdcBalance || 0));
     } catch (error) {
       console.error('Error fetching balances:', error);
@@ -156,7 +164,10 @@ export default function Header() {
                               Deposit
                             </button>
                             <button
-                              onClick={() => {/* We'll add withdraw next */}}
+                              onClick={() => {
+                                setShowWithdrawModal(true);
+                                setShowBalanceMenu(false);
+                              }}
                               className="bg-white text-gray-700 px-4 py-2.5 rounded-lg font-semibold hover:bg-gray-100 transition-colors border border-gray-300"
                             >
                               Withdraw
@@ -188,6 +199,15 @@ export default function Header() {
         <DepositModal 
           onClose={() => setShowDepositModal(false)}
           onSuccess={fetchBalances}
+        />
+      )}
+      
+      {showWithdrawModal && (
+        <WithdrawModal 
+          onClose={() => setShowWithdrawModal(false)}
+          onSuccess={fetchBalances}
+          onChainBalance={onChainBalance}
+          offChainBalance={offChainBalance}
         />
       )}
     </>
