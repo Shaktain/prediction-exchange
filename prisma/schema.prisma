@@ -23,9 +23,31 @@ model User {
   transactions  Transaction[]
 }
 
+model MarketGroup {
+  id          Int       @id @default(autoincrement())
+  question    String    @db.VarChar(100)
+  description String    @db.VarChar(500)
+  category    String
+  thumbnail   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  markets     Market[]
+  
+  @@index([category, createdAt])
+}
+
 model Market {
   id              Int       @id @default(autoincrement())
-  title           String
+  
+  // Link to parent question (optional - for multi-option markets)
+  marketGroupId   Int?
+  marketGroup     MarketGroup? @relation(fields: [marketGroupId], references: [id])
+  
+  // For standalone markets, use title. For grouped markets, use optionText
+  title           String?   @db.VarChar(100)
+  optionText      String?   @db.VarChar(50)
+  
   description     String
   category        String
   status          String    @default("active")
@@ -34,16 +56,21 @@ model Market {
   yesPrice        Decimal
   noPrice         Decimal
   totalVolume     Decimal   @default(0)
+  volume24h       Decimal   @default(0)
   totalLiquidity  Decimal   @default(0)
   traderCount     Int       @default(0)
   createdAt       DateTime  @default(now())
   endDate         DateTime
   resolvedAt      DateTime?
   contractAddress String?
+  
   orders          Order[]
   positions       Position[]
   trades          Trade[]
   priceHistory    PriceHistory[]
+  
+  @@index([marketGroupId, createdAt])
+  @@index([category, status, volume24h])
 }
 
 model Order {
@@ -54,7 +81,7 @@ model Order {
   market          Market    @relation(fields: [marketId], references: [id])
   
   side            String    // "yes" or "no"
-  direction       String    // "buy" or "sell" - NEW FIELD
+  direction       String    // "buy" or "sell"
   type            String    // "limit" or "market"
   price           Decimal   @db.Decimal(10, 6)
   quantity        Decimal   @db.Decimal(18, 6)

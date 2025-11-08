@@ -2,22 +2,61 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Header from '@/components/Header';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Plus, X, AlertCircle } from 'lucide-react';
+
+interface Option {
+  id: string;
+  text: string;
+}
 
 export default function CreateMarketPage() {
   const router = useRouter();
+  const [marketType, setMarketType] = useState<'single' | 'multiple'>('single');
   const [formData, setFormData] = useState({
-    title: '',
+    question: '',
     description: '',
     category: 'Crypto',
+    thumbnail: '💰', // Default emoji
     endDate: '',
     yesPrice: 0.5,
     noPrice: 0.5
   });
+  const [options, setOptions] = useState<Option[]>([
+    { id: '1', text: '' },
+    { id: '2', text: '' }
+  ]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [charCounts, setCharCounts] = useState({
+    question: 0,
+    description: 0
+  });
 
   const categories = ['Crypto', 'Technology', 'Space', 'Politics', 'Entertainment', 'Sports', 'Climate'];
+
+  const MAX_CHARS = {
+    question: 100,
+    option: 50,
+    description: 500
+  };
+
+  const addOption = () => {
+    if (options.length < 10) {
+      setOptions([...options, { id: Date.now().toString(), text: '' }]);
+    }
+  };
+
+  const removeOption = (id: string) => {
+    if (options.length > 2) {
+      setOptions(options.filter(opt => opt.id !== id));
+    }
+  };
+
+  const updateOption = (id: string, text: string) => {
+    if (text.length <= MAX_CHARS.option) {
+      setOptions(options.map(opt => opt.id === id ? { ...opt, text } : opt));
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,10 +64,53 @@ export default function CreateMarketPage() {
     setError('');
 
     try {
-      const response = await fetch('/api/markets', {
+      // Validation
+      if (formData.question.length > MAX_CHARS.question) {
+        throw new Error(`Question must be ${MAX_CHARS.question} characters or less`);
+      }
+      if (formData.description.length > MAX_CHARS.description) {
+        throw new Error(`Description must be ${MAX_CHARS.description} characters or less`);
+      }
+
+      let payload;
+
+      if (marketType === 'single') {
+        // Single market
+        payload = {
+          type: 'single',
+          title: formData.question,
+          description: formData.description,
+          category: formData.category,
+          endDate: formData.endDate,
+          yesPrice: formData.yesPrice,
+          noPrice: formData.noPrice
+        };
+      } else {
+        // Multi-option market
+        const validOptions = options.filter(opt => opt.text.trim() !== '');
+        if (validOptions.length < 2) {
+          throw new Error('Please add at least 2 options');
+        }
+
+        payload = {
+          type: 'multiple',
+          question: formData.question,
+          description: formData.description,
+          category: formData.category,
+          thumbnail: formData.thumbnail,
+          endDate: formData.endDate,
+          options: validOptions.map(opt => ({
+            text: opt.text,
+            yesPrice: formData.yesPrice,
+            noPrice: formData.noPrice
+          }))
+        };
+      }
+
+      const response = await fetch('/api/markets/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(payload)
       });
 
       if (!response.ok) {
@@ -48,7 +130,7 @@ export default function CreateMarketPage() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       <Header />
       
-      <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <button
           onClick={() => router.push('/admin')}
           className="flex items-center text-gray-600 hover:text-gray-900 mb-6 transition-colors"
@@ -61,40 +143,162 @@ export default function CreateMarketPage() {
           <h1 className="text-3xl font-bold text-gray-900 mb-6">Create New Market</h1>
 
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
-              {error}
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6 flex items-start gap-2">
+              <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+              <span>{error}</span>
             </div>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Market Type Selection */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-3">
+                Market Type
+              </label>
+              <div className="grid grid-cols-2 gap-4">
+                <button
+                  type="button"
+                  onClick={() => setMarketType('single')}
+                  className={`p-4 rounded-lg border-2 transition-all ${
+                    marketType === 'single'
+                      ? 'border-blue-500 bg-blue-50'
+                      : 'border-gray-300 hover:border-gray-400'
+                  }`}
+                >
+                  <div className="font-semibold text-gray-900">Single Market</div>
+                  <div className="text-sm text-gray-600 mt-1">One yes/no question</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMarketType('multiple')}
+                  className={`p-4 rounded-lg border-2 transition-all ${
+                    marketType === 'multiple'
+                      ? 'border-blue-500 bg-blue-50'
+                      : 'border-gray-300 hover:border-gray-400'
+                  }`}
+                >
+                  <div className="font-semibold text-gray-900">Multi-Option</div>
+                  <div className="text-sm text-gray-600 mt-1">Multiple choice options</div>
+                </button>
+              </div>
+            </div>
+
+            {/* Question */}
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Market Question
+                {marketType === 'single' ? 'Market Question' : 'Main Question'}
               </label>
               <input
                 type="text"
-                value={formData.title}
-                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                placeholder="Will Bitcoin reach $100,000 by end of 2025?"
+                value={formData.question}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value.length <= MAX_CHARS.question) {
+                    setFormData({ ...formData, question: value });
+                    setCharCounts({ ...charCounts, question: value.length });
+                  }
+                }}
+                placeholder={marketType === 'single' 
+                  ? "Will Bitcoin reach $100,000 by end of 2025?"
+                  : "By when will Bitcoin reach $150,000?"
+                }
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 required
               />
+              <div className="text-xs text-gray-500 mt-1 text-right">
+                {charCounts.question}/{MAX_CHARS.question} characters
+              </div>
             </div>
 
+            {/* Thumbnail (multi-option only) */}
+            {marketType === 'multiple' && (
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Thumbnail Emoji
+                </label>
+                <input
+                  type="text"
+                  value={formData.thumbnail}
+                  onChange={(e) => setFormData({ ...formData, thumbnail: e.target.value })}
+                  placeholder="💰"
+                  maxLength={2}
+                  className="w-24 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-2xl text-center"
+                />
+                <p className="text-xs text-gray-500 mt-1">Choose an emoji or icon</p>
+              </div>
+            )}
+
+            {/* Options (multi-option only) */}
+            {marketType === 'multiple' && (
+              <div>
+                <div className="flex justify-between items-center mb-3">
+                  <label className="block text-sm font-semibold text-gray-700">
+                    Options ({options.length})
+                  </label>
+                  <button
+                    type="button"
+                    onClick={addOption}
+                    disabled={options.length >= 10}
+                    className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 disabled:text-gray-400"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add Option
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {options.map((option, index) => (
+                    <div key={option.id} className="flex gap-2">
+                      <input
+                        type="text"
+                        value={option.text}
+                        onChange={(e) => updateOption(option.id, e.target.value)}
+                        placeholder={`Option ${index + 1} (e.g., "Before January 2026")`}
+                        className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        required
+                      />
+                      <div className="text-xs text-gray-500 flex items-center px-2">
+                        {option.text.length}/{MAX_CHARS.option}
+                      </div>
+                      {options.length > 2 && (
+                        <button
+                          type="button"
+                          onClick={() => removeOption(option.id)}
+                          className="p-3 text-red-600 hover:bg-red-50 rounded-lg transition"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Description */}
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">
                 Description
               </label>
               <textarea
                 value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value.length <= MAX_CHARS.description) {
+                    setFormData({ ...formData, description: value });
+                    setCharCounts({ ...charCounts, description: value.length });
+                  }
+                }}
                 placeholder="Detailed description of how this market will be resolved..."
                 rows={4}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 required
               />
+              <div className="text-xs text-gray-500 mt-1 text-right">
+                {charCounts.description}/{MAX_CHARS.description} characters
+              </div>
             </div>
 
+            {/* Category and End Date */}
             <div className="grid grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
@@ -125,6 +329,7 @@ export default function CreateMarketPage() {
               </div>
             </div>
 
+            {/* Initial Prices */}
             <div className="grid grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
@@ -164,6 +369,7 @@ export default function CreateMarketPage() {
               </div>
             </div>
 
+            {/* Submit Buttons */}
             <div className="flex gap-4 pt-4">
               <button
                 type="button"
@@ -177,7 +383,7 @@ export default function CreateMarketPage() {
                 disabled={loading}
                 className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold py-3 px-6 rounded-lg transition"
               >
-                {loading ? 'Creating...' : 'Create Market'}
+                {loading ? 'Creating...' : `Create ${marketType === 'single' ? 'Market' : 'Markets'}`}
               </button>
             </div>
           </form>

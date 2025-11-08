@@ -5,16 +5,46 @@ import FilterBar from '@/components/FilterBar';
 import MarketCard from '@/components/MarketCard';
 import { CATEGORIES } from '@/lib/data/markets';
 
-interface Market {
+interface SingleMarket {
+  type: 'single';
   id: number;
   title: string;
   category: string;
   yesPrice: number;
   noPrice: number;
   totalVolume: number;
+  volume24h: number;
+  totalLiquidity: number;
   endDate: string;
   resolved: boolean;
+  outcome?: boolean | null;
+  trending: boolean;
 }
+
+interface MarketOption {
+  id: number;
+  optionText: string;
+  yesPrice: number;
+  noPrice: number;
+  resolved: boolean;
+  outcome: boolean | null;
+}
+
+interface MarketGroup {
+  type: 'group';
+  id: number;
+  question: string;
+  description: string;
+  category: string;
+  thumbnail: string;
+  options: MarketOption[];
+  totalVolume: number;
+  totalVolume24h: number;
+  totalLiquidity: number;
+  trending: boolean;
+}
+
+type Market = SingleMarket | MarketGroup;
 
 export default function Home() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -29,6 +59,7 @@ export default function Home() {
       try {
         const response = await fetch('/api/markets');
         const data = await response.json();
+        console.log('Markets data:', data);
         setMarkets(data.markets);
       } catch (error) {
         console.error('Error fetching markets:', error);
@@ -41,40 +72,53 @@ export default function Home() {
 
   // Filter markets by active/resolved tab
   const tabFilteredMarkets = markets.filter(market => {
-    if (activeTab === 'active') {
-      return !market.resolved;
+    if (market.type === 'single') {
+      if (activeTab === 'active') {
+        return !market.resolved;
+      } else {
+        return market.resolved;
+      }
     } else {
-      return market.resolved;
+      // For market groups, check if any option matches the tab
+      const hasActiveOptions = market.options.some(opt => !opt.resolved);
+      const hasResolvedOptions = market.options.some(opt => opt.resolved);
+      
+      if (activeTab === 'active') {
+        return hasActiveOptions;
+      } else {
+        return hasResolvedOptions;
+      }
     }
   });
 
-  // Then apply search and category filters
+  // Apply search and category filters
   const filteredMarkets = tabFilteredMarkets.filter(market => {
-    const matchesSearch = market.title.toLowerCase().includes(searchTerm.toLowerCase());
+    const searchText = market.type === 'single' ? (market.title || '') : (market.question || '');
+    const matchesSearch = searchText.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = selectedCategory === 'All' || market.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });
 
-  // Calculate probability from prices
-  const getMarketWithProbability = (market: Market) => {
-    const probability = Math.round(Number(market.yesPrice) * 100);
-    const volume = `$${(Number(market.totalVolume) / 1000).toFixed(1)}K`;
-    const endDate = new Date(market.endDate).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
-
-    return {
-      ...market,
-      probability,
-      volume,
-      endDate
-    };
+  // Format volume for display
+  const formatVolume = (volume: number): string => {
+    if (volume >= 1000000) {
+      return `$${(volume / 1000000).toFixed(1)}M`;
+    } else if (volume >= 1000) {
+      return `$${(volume / 1000).toFixed(1)}K`;
+    } else {
+      return `$${volume.toFixed(0)}`;
+    }
   };
 
-  const activeCount = markets.filter(m => !m.resolved).length;
-  const resolvedCount = markets.filter(m => m.resolved).length;
+  const activeCount = markets.filter(m => {
+    if (m.type === 'single') return !m.resolved;
+    return m.options.some(opt => !opt.resolved);
+  }).length;
+  
+  const resolvedCount = markets.filter(m => {
+    if (m.type === 'single') return m.resolved;
+    return m.options.some(opt => opt.resolved);
+  }).length;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
@@ -147,20 +191,41 @@ export default function Home() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredMarkets.length > 0 ? (
               filteredMarkets.map(market => {
-                const marketData = getMarketWithProbability(market);
-                return (
-                  <MarketCard
-                    key={market.id}
-                    id={market.id}
-                    title={market.title}
-                    probability={marketData.probability}
-                    volume={marketData.volume}
-                    endDate={marketData.endDate}
-                    category={market.category}
-                    resolved={market.resolved}
-                    outcome={market.outcome}
-                  />
-                );
+                if (market.type === 'single') {
+                  const probability = Math.round(market.yesPrice * 100);
+                  return (
+                    <MarketCard
+                      key={`single-${market.id}`}
+                      id={market.id}
+                      title={market.title}
+                      probability={probability}
+                      yesPrice={market.yesPrice}
+                      noPrice={market.noPrice}
+                      volume={formatVolume(market.totalVolume)}
+                      volume24h={market.volume24h}
+                      liquidity={formatVolume(market.totalLiquidity)}
+                      category={market.category}
+                      resolved={market.resolved}
+                      outcome={market.outcome}
+                      trending={market.trending}
+                    />
+                  );
+                } else {
+                  return (
+                    <MarketCard
+                      key={`group-${market.id}`}
+                      marketGroupId={market.id}
+                      question={market.question}
+                      thumbnail={market.thumbnail}
+                      options={market.options}
+                      volume={formatVolume(market.totalVolume)}
+                      volume24h={market.totalVolume24h}
+                      liquidity={formatVolume(market.totalLiquidity)}
+                      category={market.category}
+                      trending={market.trending}
+                    />
+                  );
+                }
               })
             ) : (
               <div className="col-span-full text-center py-12">

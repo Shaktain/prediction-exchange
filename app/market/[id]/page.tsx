@@ -54,12 +54,45 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
       try {
         const response = await fetch('/api/markets');
         const data = await response.json();
-        const foundMarket = data.markets.find((m: Market) => m.id === parseInt(id));
+        let foundMarket = data.markets.find((m: any) => {
+          if (m.type === 'single' && m.id === parseInt(id)) {
+            return true;
+          }
+          // Check if this ID is an option within a market group
+          if (m.type === 'group') {
+            const option = m.options?.find((opt: any) => opt.id === parseInt(id));
+            if (option) {
+              // Transform the option into a market-like object
+              return true;
+            }
+          }
+          return false;
+        });
+
+        // If found in a market group, transform it
+        if (foundMarket && foundMarket.type === 'group') {
+          const option = foundMarket.options.find((opt: any) => opt.id === parseInt(id));
+          if (option) {
+            foundMarket = {
+              id: option.id,
+              title: option.optionText, // Use optionText as title
+              description: foundMarket.description, // Use parent group description
+              category: foundMarket.category,
+              yesPrice: option.yesPrice,
+              noPrice: option.noPrice,
+              totalVolume: 0, // Individual option volume not tracked separately yet
+              totalLiquidity: 0,
+              traderCount: 0,
+              endDate: foundMarket.options[0]?.endDate || new Date().toISOString() // Use first option's end date
+            };
+          }
+        }
+
         setMarket(foundMarket || null);
         
         // Fetch order book
         if (foundMarket) {
-          const obResponse = await fetch(`/api/orderbook?marketId=${foundMarket.id}`);
+          const obResponse = await fetch(`/api/orderbook?marketId=${parseInt(id)}`);
           const obData = await obResponse.json();
           setOrderBookData(obData.orderBook);
         }
@@ -368,7 +401,7 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
                     <Users className="w-4 h-4 mr-1" />
                     <span className="text-sm">Traders</span>
                   </div>
-                  <p className="text-2xl font-bold text-gray-900">{market.traderCount.toLocaleString()}</p>
+                  <p className="text-2xl font-bold text-gray-900">{(market.traderCount || 0).toLocaleString()}</p>
                 </div>
 
                 <div className="bg-gray-50 rounded-lg p-4">
