@@ -94,7 +94,13 @@ export async function POST(request: NextRequest) {
     }
     
     const position = await prisma.position.findUnique({
-      where: { userId_marketId: { userId, marketId: parseInt(marketId) } }
+      where: { 
+        userId_marketId_mode: { 
+          userId, 
+          marketId: parseInt(marketId),
+          mode // ← Include mode
+        } 
+      }
     });
     
     // Get correct balances based on mode
@@ -162,7 +168,8 @@ export async function POST(request: NextRequest) {
         price,
         quantity,
         remaining: quantity,
-        status: 'open'
+        status: 'open',
+        mode // ← Store the mode with order
       }
     });
     
@@ -252,9 +259,10 @@ export async function DELETE(request: NextRequest) {
     // Get user's position to calculate unlock amount correctly
     const position = await prisma.position.findUnique({
       where: { 
-        userId_marketId: { 
+        userId_marketId_mode: { 
           userId: order.userId, 
-          marketId: order.marketId 
+          marketId: order.marketId,
+          mode // ← Include mode
         } 
       }
     });
@@ -330,11 +338,13 @@ async function matchOrder(prisma: any, newOrder: any, marketId: number, mode: st
 
   const oppositeDirection = newOrder.direction === 'buy' ? 'sell' : 'buy';
   
+  // CRITICAL: Only match orders with the same mode
   const opposingOrders = await prisma.order.findMany({
     where: {
       marketId,
       side: newOrder.side,
       direction: oppositeDirection,
+      mode: mode, // ← Only match same mode
       status: { in: ['open', 'partial'] },
       remaining: { gt: 0 }
     },
@@ -343,7 +353,7 @@ async function matchOrder(prisma: any, newOrder: any, marketId: number, mode: st
       : [{ price: 'desc' }, { createdAt: 'asc' }]
   });
   
-  console.log(`📊 Found ${opposingOrders.length} opposing orders`);
+  console.log(`📊 Found ${opposingOrders.length} opposing ${mode} orders`);
   
   let remainingQty = Number(newOrder.remaining);
   
@@ -380,7 +390,8 @@ async function matchOrder(prisma: any, newOrder: any, marketId: number, mode: st
         sellerUserId: sellOrder.userId,
         side: newOrder.side,
         price: executionPrice,
-        quantity: matchQty
+        quantity: matchQty,
+        mode // ← Store the mode with trade
       }
     });
     
@@ -453,7 +464,13 @@ async function settleTradeForBuyer(
   
   // Update or create position
   const position = await prisma.position.findUnique({
-    where: { userId_marketId: { userId, marketId } }
+    where: { 
+      userId_marketId_mode: { 
+        userId, 
+        marketId,
+        mode // ← Include mode in lookup
+      } 
+    }
   });
   
   const field = side === 'yes' ? 'yesShares' : 'noShares';
@@ -514,6 +531,7 @@ async function settleTradeForBuyer(
       data: {
         userId,
         marketId,
+        mode, // ← Store mode with position
         yesShares: side === 'yes' ? quantity : 0,
         noShares: side === 'no' ? quantity : 0,
         avgYesCost: side === 'yes' ? price : 0,
@@ -539,7 +557,13 @@ async function settleTradeForSeller(
   const proceeds = quantity * price;
   
   const position = await prisma.position.findUnique({
-    where: { userId_marketId: { userId, marketId } }
+    where: { 
+      userId_marketId_mode: { 
+        userId, 
+        marketId,
+        mode // ← Include mode in lookup
+      } 
+    }
   });
   
   const field = side === 'yes' ? 'yesShares' : 'noShares';
@@ -635,6 +659,7 @@ async function settleTradeForSeller(
         data: {
           userId,
           marketId,
+          mode, // ← Store mode
           yesShares: side === 'yes' ? -quantity : 0,
           noShares: side === 'no' ? -quantity : 0,
           avgYesCost: side === 'yes' ? price : 0,

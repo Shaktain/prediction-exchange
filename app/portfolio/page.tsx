@@ -2,7 +2,8 @@
 import { useState, useEffect } from 'react';
 import { useAccount } from 'wagmi';
 import Header from '@/components/Header';
-import { TrendingUp, TrendingDown, DollarSign } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Zap, Shield } from 'lucide-react';
+import { useTradingMode } from '@/lib/contexts/TradingModeContext';
 
 interface Position {
   id: string;
@@ -42,6 +43,7 @@ interface Order {
 
 export default function PortfolioPage() {
   const { address, isConnected } = useAccount();
+  const { mode } = useTradingMode();
   const [positions, setPositions] = useState<Position[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
@@ -64,15 +66,20 @@ export default function PortfolioPage() {
         });
         const userData = await userResponse.json();
         setUserId(userData.userId);
-        setBalance(userData.balance);
+        
+        // Get balance based on current mode
+        const balanceAmount = mode === 'demo' 
+          ? Number(userData.user?.demoBalance || 0) - Number(userData.user?.demoLockedBalance || 0)
+          : Number(userData.user?.usdcBalance || 0) - Number(userData.user?.realLockedBalance || 0);
+        setBalance(balanceAmount);
 
-        // Fetch positions
-        const positionsResponse = await fetch(`/api/positions?userId=${userData.userId}`);
+        // Fetch positions for current mode
+        const positionsResponse = await fetch(`/api/positions?userId=${userData.userId}&mode=${mode}`);
         const positionsData = await positionsResponse.json();
         setPositions(positionsData.positions || []);
 
-        // Fetch orders
-        const ordersResponse = await fetch(`/api/orders?userId=${userData.userId}`);
+        // Fetch orders for current mode
+        const ordersResponse = await fetch(`/api/orders?userId=${userData.userId}&mode=${mode}`);
         const ordersData = await ordersResponse.json();
         setOrders(ordersData.orders || []);
       } catch (error) {
@@ -88,7 +95,7 @@ export default function PortfolioPage() {
     const interval = setInterval(fetchPortfolio, 5000);
     
     return () => clearInterval(interval);
-  }, [address, isConnected]);
+  }, [address, isConnected, mode]);
 
   if (!isConnected) {
     return (
@@ -137,6 +144,27 @@ export default function PortfolioPage() {
       <Header />
       
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Mode Badge */}
+        <div className="mb-6">
+          <div className={`inline-flex items-center gap-2 px-6 py-3 rounded-lg font-semibold shadow-lg ${
+            mode === 'demo' 
+              ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white' 
+              : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white'
+          }`}>
+            {mode === 'demo' ? (
+              <>
+                <Zap className="w-5 h-5" />
+                <span>Demo Portfolio - Practice Trading</span>
+              </>
+            ) : (
+              <>
+                <Shield className="w-5 h-5" />
+                <span>Real Portfolio - Live Trading</span>
+              </>
+            )}
+          </div>
+        </div>
+
         <h1 className="text-4xl font-bold text-gray-900 mb-8">My Portfolio</h1>
 
         {/* Balance Cards */}
@@ -203,11 +231,13 @@ export default function PortfolioPage() {
                     </div>
 
                     <div className="grid grid-cols-2 gap-4 text-sm">
-                      {Number(position.yesShares) > 0 && (
-                        <div className="bg-green-50 rounded p-3">
-                          <div className="text-green-700 font-semibold mb-1">YES Shares</div>
+                      {Number(position.yesShares) !== 0 && (
+                        <div className={`rounded p-3 ${Number(position.yesShares) > 0 ? 'bg-green-50' : 'bg-orange-50'}`}>
+                          <div className={`font-semibold mb-1 ${Number(position.yesShares) > 0 ? 'text-green-700' : 'text-orange-700'}`}>
+                            {Number(position.yesShares) > 0 ? 'YES Shares (Long)' : 'YES Shares (Short)'}
+                          </div>
                           <div className="text-gray-900">
-                            {Number(position.yesShares).toFixed(2)} @ ${Number(position.avgYesCost).toFixed(2)}
+                            {Math.abs(Number(position.yesShares)).toFixed(2)} @ ${Number(position.avgYesCost).toFixed(2)}
                           </div>
                           <div className="text-xs text-gray-500 mt-1">
                             Current: ${Number(position.market.yesPrice).toFixed(2)}
@@ -215,11 +245,13 @@ export default function PortfolioPage() {
                         </div>
                       )}
                       
-                      {Number(position.noShares) > 0 && (
-                        <div className="bg-red-50 rounded p-3">
-                          <div className="text-red-700 font-semibold mb-1">NO Shares</div>
+                      {Number(position.noShares) !== 0 && (
+                        <div className={`rounded p-3 ${Number(position.noShares) > 0 ? 'bg-red-50' : 'bg-orange-50'}`}>
+                          <div className={`font-semibold mb-1 ${Number(position.noShares) > 0 ? 'text-red-700' : 'text-orange-700'}`}>
+                            {Number(position.noShares) > 0 ? 'NO Shares (Long)' : 'NO Shares (Short)'}
+                          </div>
                           <div className="text-gray-900">
-                            {Number(position.noShares).toFixed(2)} @ ${Number(position.avgNoCost).toFixed(2)}
+                            {Math.abs(Number(position.noShares)).toFixed(2)} @ ${Number(position.avgNoCost).toFixed(2)}
                           </div>
                           <div className="text-xs text-gray-500 mt-1">
                             Current: ${Number(position.market.noPrice).toFixed(2)}
@@ -279,24 +311,24 @@ export default function PortfolioPage() {
                     </div>
 
                     <div className="grid grid-cols-2 gap-4 text-sm">
-                      {Number(position.yesShares) > 0 && (
+                      {Number(position.yesShares) !== 0 && (
                         <div className={`rounded p-3 ${position.market.outcome ? 'bg-green-100 border-2 border-green-400' : 'bg-green-50'}`}>
                           <div className="text-green-700 font-semibold mb-1">
                             YES Shares {position.market.outcome && '✓'}
                           </div>
                           <div className="text-gray-900">
-                            {Number(position.yesShares).toFixed(2)} @ ${Number(position.avgYesCost).toFixed(2)}
+                            {Math.abs(Number(position.yesShares)).toFixed(2)} @ ${Number(position.avgYesCost).toFixed(2)}
                           </div>
                         </div>
                       )}
                       
-                      {Number(position.noShares) > 0 && (
+                      {Number(position.noShares) !== 0 && (
                         <div className={`rounded p-3 ${!position.market.outcome ? 'bg-red-100 border-2 border-red-400' : 'bg-red-50'}`}>
                           <div className="text-red-700 font-semibold mb-1">
                             NO Shares {!position.market.outcome && '✓'}
                           </div>
                           <div className="text-gray-900">
-                            {Number(position.noShares).toFixed(2)} @ ${Number(position.avgNoCost).toFixed(2)}
+                            {Math.abs(Number(position.noShares)).toFixed(2)} @ ${Number(position.avgNoCost).toFixed(2)}
                           </div>
                         </div>
                       )}

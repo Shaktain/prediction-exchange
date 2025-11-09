@@ -24,6 +24,7 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const userId = searchParams.get('userId');
+    const mode = searchParams.get('mode') || 'demo'; // Get mode from query
 
     if (!userId) {
       return NextResponse.json(
@@ -33,7 +34,10 @@ export async function GET(request: NextRequest) {
     }
 
     const positions = await prisma.position.findMany({
-      where: { userId },
+      where: { 
+        userId,
+        mode // ← Filter by mode
+      },
       include: {
         market: true
       }
