@@ -27,6 +27,7 @@ export default function MarketGroupPage() {
   const params = useParams();
   const router = useRouter();
   const [marketGroup, setMarketGroup] = useState<MarketGroup | null>(null);
+  const [priceChanges, setPriceChanges] = useState<{ [key: number]: number }>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -38,6 +39,13 @@ export default function MarketGroupPage() {
         }
         const data = await response.json();
         setMarketGroup(data.marketGroup);
+
+        // Fetch price changes
+        const priceChangeResponse = await fetch(`/api/market-groups/${params.id}/price-changes`);
+        if (priceChangeResponse.ok) {
+          const priceChangeData = await priceChangeResponse.json();
+          setPriceChanges(priceChangeData.priceChanges || {});
+        }
       } catch (error) {
         console.error('Error fetching market group:', error);
       } finally {
@@ -125,88 +133,89 @@ export default function MarketGroupPage() {
         <div className="grid grid-cols-1 gap-4">
           {sortedOptions.map((option, index) => {
             const probability = Math.round(option.yesPrice * 100);
+            const priceChange = priceChanges[option.id] || 0;
+            const isPositive = priceChange > 0;
+            const isNegative = priceChange < 0;
             
             return (
               <div
                 key={option.id}
                 onClick={() => router.push(`/market/${option.id}`)}
-                className="bg-white rounded-lg shadow-md p-6 hover:shadow-xl transition-all duration-300 cursor-pointer transform hover:-translate-y-1"
+                className="bg-white rounded-lg shadow-md p-6 hover:shadow-xl transition-all duration-300 cursor-pointer"
               >
                 <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-3">
-                      <span className="text-lg font-bold text-gray-700">
-                        #{index + 1}
-                      </span>
-                      <h3 className="text-xl font-bold text-gray-900">
-                        {option.optionText}
-                      </h3>
-                      {option.resolved && (
-                        <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
-                          option.outcome 
-                            ? 'bg-green-100 text-green-700' 
-                            : 'bg-red-100 text-red-700'
+                  {/* Left: Option Name */}
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-lg font-semibold text-gray-900 truncate">
+                      {option.optionText}
+                    </h3>
+                  </div>
+
+                  {/* Center: Probability and Change */}
+                  <div className="flex items-center gap-3 mx-6">
+                    <div className="text-right">
+                      <div className={`text-2xl font-bold ${
+                        probability >= 70 ? 'text-green-600' :
+                        probability >= 40 ? 'text-gray-900' :
+                        'text-red-600'
+                      }`}>
+                        {probability}%
+                      </div>
+                      {priceChange !== 0 && (
+                        <div className={`text-sm font-semibold flex items-center justify-end gap-1 ${
+                          isPositive ? 'text-green-600' : 'text-red-600'
                         }`}>
-                          {option.outcome ? 'Resolved YES' : 'Resolved NO'}
-                        </span>
+                          <span>{isPositive ? '▲' : '▼'}</span>
+                          <span>{Math.abs(priceChange)}</span>
+                        </div>
                       )}
                     </div>
 
-                    <div className="flex items-center gap-6">
-                      <div>
-                        <div className="text-sm text-gray-600 mb-1">Probability</div>
-                        <div className={`text-3xl font-bold ${
-                          probability >= 70 ? 'text-green-600' :
-                          probability >= 40 ? 'text-gray-900' :
-                          'text-red-600'
-                        }`}>
-                          {probability}%
-                        </div>
-                      </div>
-
-                      <div className="flex-1">
-                        <div className="w-full bg-gray-200 rounded-full h-3">
-                          <div
-                            className={`h-3 rounded-full transition-all ${
-                              probability >= 70 ? 'bg-gradient-to-r from-green-400 to-green-600' :
-                              probability >= 40 ? 'bg-gradient-to-r from-yellow-400 to-orange-500' :
-                              'bg-gradient-to-r from-red-400 to-red-600'
-                            }`}
-                            style={{ width: `${probability}%` }}
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="text-sm text-gray-600 mb-1">Volume</div>
-                        <div className="text-lg font-semibold text-gray-900">
-                          ${(Number(option.totalVolume) / 1000).toFixed(1)}K
-                        </div>
+                    {/* Probability Bar */}
+                    <div className="w-64">
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className={`h-2 rounded-full transition-all ${
+                            probability >= 70 ? 'bg-gradient-to-r from-green-400 to-green-600' :
+                            probability >= 40 ? 'bg-gradient-to-r from-yellow-400 to-orange-500' :
+                            'bg-gradient-to-r from-red-400 to-red-600'
+                          }`}
+                          style={{ width: `${probability}%` }}
+                        />
                       </div>
                     </div>
                   </div>
 
-                  {!option.resolved && (
-                    <div className="flex gap-3 ml-6">
+                  {/* Right: Yes/No Buttons */}
+                  {!option.resolved ? (
+                    <div className="flex gap-2">
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           router.push(`/market/${option.id}?side=yes&action=buy`);
                         }}
-                        className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition"
+                        className="px-6 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-lg transition border border-blue-200"
                       >
-                        Buy YES
+                        Yes
                       </button>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           router.push(`/market/${option.id}?side=no&action=buy`);
                         }}
-                        className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition"
+                        className="px-6 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 font-semibold rounded-lg transition border border-purple-200"
                       >
-                        Buy NO
+                        No
                       </button>
                     </div>
+                  ) : (
+                    <span className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+                      option.outcome 
+                        ? 'bg-green-100 text-green-700' 
+                        : 'bg-red-100 text-red-700'
+                    }`}>
+                      {option.outcome ? 'Resolved YES' : 'Resolved NO'}
+                    </span>
                   )}
                 </div>
               </div>

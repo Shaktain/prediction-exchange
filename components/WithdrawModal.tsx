@@ -22,9 +22,9 @@ export default function WithdrawModal({
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [step, setStep] = useState<'input' | 'withdrawing' | 'success'>('input');
+  const [step, setStep] = useState<'input' | 'withdrawing' | 'syncing' | 'success'>('input');
 
-  const maxWithdrawable = onChainBalance; // Only settled balance can be withdrawn immediately
+  const maxWithdrawable = onChainBalance; // Only available balance can be withdrawn
 
   async function handleWithdraw() {
     if (!amount || parseFloat(amount) <= 0) {
@@ -37,6 +37,11 @@ export default function WithdrawModal({
       return;
     }
 
+    if (!address) {
+      setError('Wallet not connected');
+      return;
+    }
+
     setLoading(true);
     setError('');
 
@@ -45,11 +50,32 @@ export default function WithdrawModal({
       const signer = await provider.getSigner();
       const vaultContract = getVaultContract(signer);
 
-      const amountInWei = ethers.parseUnits(amount, 6); // USDC has 6 decimals
+      const amountInWei = ethers.parseUnits(amount, 6);
 
       setStep('withdrawing');
       const withdrawTx = await vaultContract.withdraw(amountInWei);
-      await withdrawTx.wait();
+      const receipt = await withdrawTx.wait();
+
+      console.log('✅ Withdrawal transaction confirmed:', receipt.hash);
+
+      // Sync with database
+      setStep('syncing');
+      const syncResponse = await fetch('/api/withdrawals/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          walletAddress: address,
+          amount: parseFloat(amount),
+          txHash: receipt.hash
+        })
+      });
+
+      if (!syncResponse.ok) {
+        console.error('Failed to sync withdrawal with database');
+        // Continue anyway - the withdrawal succeeded on-chain
+      } else {
+        console.log('✅ Database synced');
+      }
 
       setStep('success');
       setTimeout(() => {
@@ -75,13 +101,14 @@ export default function WithdrawModal({
             <h2 className="text-2xl font-bold">Withdraw USDC</h2>
             <button
               onClick={onClose}
-              className="text-white/80 hover:text-white transition-colors"
+              disabled={loading}
+              className="text-white/80 hover:text-white transition-colors disabled:opacity-50"
             >
               <X className="w-6 h-6" />
             </button>
           </div>
           <p className="text-purple-100 text-sm mt-2">
-            Withdraw USDC from your on-chain vault
+            Withdraw USDC to your wallet
           </p>
         </div>
 
@@ -101,8 +128,8 @@ export default function WithdrawModal({
                     <div className="flex items-start gap-2 mt-3 pt-3 border-t border-blue-200">
                       <Info className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
                       <p className="text-xs text-blue-700">
-                        You have {offChainBalance.toFixed(2)} USDC in pending trades. 
-                        These will be available after settlement.
+                        You have {offChainBalance.toFixed(2)} USDC locked in open orders. 
+                        Cancel orders to free up funds for withdrawal.
                       </p>
                     </div>
                   )}
@@ -148,7 +175,7 @@ export default function WithdrawModal({
               {/* Info */}
               <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
                 <p className="text-sm text-yellow-800">
-                  <strong>Note:</strong> USDC will be sent to your wallet address. 
+                  <strong>Note:</strong> USDC will be sent to your wallet. 
                   You'll pay a small gas fee (~$0.01) for this transaction.
                 </p>
               </div>
@@ -156,10 +183,10 @@ export default function WithdrawModal({
               {/* Withdraw Button */}
               <button
                 onClick={handleWithdraw}
-                disabled={loading || !amount || parseFloat(amount) > maxWithdrawable}
+                disabled={loading || !amount || parseFloat(amount) > maxWithdrawable || parseFloat(amount) <= 0}
                 className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white py-3 rounded-lg font-bold text-lg hover:from-purple-700 hover:to-pink-700 transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none shadow-lg"
               >
-                Withdraw
+                Withdraw {amount && parseFloat(amount) > 0 ? `${amount} USDC` : ''}
               </button>
             </>
           )}
@@ -169,6 +196,14 @@ export default function WithdrawModal({
               <div className="inline-block animate-spin rounded-full h-16 w-16 border-b-4 border-purple-600 mb-4"></div>
               <h3 className="text-xl font-bold text-gray-900 mb-2">Withdrawing...</h3>
               <p className="text-gray-600">Please confirm the transaction in your wallet</p>
+            </div>
+          )}
+
+          {step === 'syncing' && (
+            <div className="text-center py-8">
+              <div className="inline-block animate-spin rounded-full h-16 w-16 border-b-4 border-green-600 mb-4"></div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Syncing balance...</h3>
+              <p className="text-gray-600">Updating your platform balance</p>
             </div>
           )}
 

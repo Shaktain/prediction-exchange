@@ -59,7 +59,6 @@ export default function Home() {
       try {
         const response = await fetch('/api/markets');
         const data = await response.json();
-        console.log('Markets data:', data);
         setMarkets(data.markets);
       } catch (error) {
         console.error('Error fetching markets:', error);
@@ -208,6 +207,7 @@ export default function Home() {
                       resolved={market.resolved}
                       outcome={market.outcome}
                       trending={market.trending}
+                      priceChange={market.priceChange}
                     />
                   );
                 } else {

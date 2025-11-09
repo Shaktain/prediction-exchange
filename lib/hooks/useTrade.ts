@@ -2,9 +2,11 @@
 import { useState, useMemo } from 'react';
 import { useAccount } from 'wagmi';
 import { calculatePotentialReturn } from '@/lib/utils/market-helpers';
+import { useTradingMode } from '@/lib/contexts/TradingModeContext';
 
 export function useTrade(marketId: number, yesPrice: number, noPrice: number) {
   const { address, isConnected } = useAccount();
+  const { mode } = useTradingMode();
   const [amount, setAmount] = useState('');
   const [side, setSide] = useState<'yes' | 'no'>('yes');
   const [isTrading, setIsTrading] = useState(false);
@@ -50,7 +52,7 @@ export function useTrade(marketId: number, yesPrice: number, noPrice: number) {
 
       const { userId } = await userResponse.json();
 
-      // Create order with SHARES as quantity
+      // Create order with MODE
       const orderResponse = await fetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -58,9 +60,11 @@ export function useTrade(marketId: number, yesPrice: number, noPrice: number) {
           userId,
           marketId,
           side,
+          direction: 'buy',
           type: 'market',
           price,
-          quantity: shares // Pass shares, not cost
+          quantity: shares,
+          mode // Pass trading mode
         })
       });
 
@@ -93,6 +97,7 @@ export function useTrade(marketId: number, yesPrice: number, noPrice: number) {
     error,
     executeTrade,
     isConnected,
-    potentialReturn
+    potentialReturn,
+    mode
   };
 }

@@ -80,10 +80,10 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
               category: foundMarket.category,
               yesPrice: option.yesPrice,
               noPrice: option.noPrice,
-              totalVolume: 0, // Individual option volume not tracked separately yet
-              totalLiquidity: 0,
-              traderCount: 0,
-              endDate: foundMarket.options[0]?.endDate || new Date().toISOString() // Use first option's end date
+              totalVolume: option.totalVolume || 0, // ← NOW USES ACTUAL DATA
+              totalLiquidity: option.totalLiquidity || 0, // ← NOW USES ACTUAL DATA
+              traderCount: option.traderCount || 0, // ← NOW USES ACTUAL DATA
+              endDate: option.endDate || new Date().toISOString()
             };
           }
         }

@@ -46,21 +46,62 @@ export async function GET(request: NextRequest) {
       const noShares = Number(pos.noShares);
       const avgYesCost = Number(pos.avgYesCost);
       const avgNoCost = Number(pos.avgNoCost);
+      const currentYesPrice = Number(market.yesPrice);
+      const currentNoPrice = Number(market.noPrice);
       
-      // Current value at market prices
-      const yesValue = yesShares * Number(market.yesPrice);
-      const noValue = noShares * Number(market.noPrice);
+      let yesUnrealizedPnL = 0;
+      let noUnrealizedPnL = 0;
       
-      // Cost basis
-      const yesCost = yesShares * avgYesCost;
-      const noCost = noShares * avgNoCost;
+      // Calculate YES position P&L
+      if (yesShares > 0) {
+        // LONG YES: bought at avgYesCost, currently worth currentYesPrice
+        const costBasis = yesShares * avgYesCost;
+        const currentValue = yesShares * currentYesPrice;
+        yesUnrealizedPnL = currentValue - costBasis;
+      } else if (yesShares < 0) {
+        // SHORT YES: sold at avgYesCost, would need to buy back at currentYesPrice
+        const soldFor = Math.abs(yesShares) * avgYesCost;
+        const buyBackCost = Math.abs(yesShares) * currentYesPrice;
+        yesUnrealizedPnL = soldFor - buyBackCost;
+      }
       
-      // Unrealized P&L
-      const unrealizedPnL = (yesValue + noValue) - (yesCost + noCost);
+      // Calculate NO position P&L
+      if (noShares > 0) {
+        // LONG NO: bought at avgNoCost, currently worth currentNoPrice
+        const costBasis = noShares * avgNoCost;
+        const currentValue = noShares * currentNoPrice;
+        noUnrealizedPnL = currentValue - costBasis;
+      } else if (noShares < 0) {
+        // SHORT NO: sold at avgNoCost, would need to buy back at currentNoPrice
+        const soldFor = Math.abs(noShares) * avgNoCost;
+        const buyBackCost = Math.abs(noShares) * currentNoPrice;
+        noUnrealizedPnL = soldFor - buyBackCost;
+      }
+      
+      const unrealizedPnL = yesUnrealizedPnL + noUnrealizedPnL;
+      const realizedPnL = Number(pos.realizedPnL);
+      const totalPnL = unrealizedPnL + realizedPnL;
 
       return {
-        ...pos,
-        unrealizedPnL
+        id: pos.id,
+        userId: pos.userId,
+        marketId: pos.marketId,
+        yesShares,
+        noShares,
+        avgYesCost,
+        avgNoCost,
+        realizedPnL,
+        unrealizedPnL,
+        totalPnL,
+        market: {
+          id: market.id,
+          title: market.title,
+          category: market.category,
+          yesPrice: currentYesPrice,
+          noPrice: currentNoPrice,
+          resolved: market.resolved,
+          outcome: market.outcome
+        }
       };
     });
 

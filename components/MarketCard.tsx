@@ -22,6 +22,7 @@ interface MarketCardProps {
   noPrice?: number;
   resolved?: boolean;
   outcome?: boolean | null;
+  priceChange?: number;
   
   // For multi-option markets
   marketGroupId?: number;
@@ -236,13 +237,23 @@ export default function MarketCard(props: MarketCardProps) {
             <div className="mb-4">
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm text-gray-600">Probability</span>
-                <span className={`text-2xl font-bold ${
-                  probability >= 70 ? 'text-green-600' :
-                  probability >= 40 ? 'text-gray-900' :
-                  'text-red-600'
-                }`}>
-                  {probability}%
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className={`text-2xl font-bold ${
+                    probability >= 70 ? 'text-green-600' :
+                    probability >= 40 ? 'text-gray-900' :
+                    'text-red-600'
+                  }`}>
+                    {probability}%
+                  </span>
+                  {props.priceChange !== undefined && props.priceChange !== 0 && (
+                    <span className={`text-sm font-semibold flex items-center gap-0.5 ${
+                      props.priceChange > 0 ? 'text-green-600' : 'text-red-600'
+                    }`}>
+                      <span>{props.priceChange > 0 ? '▲' : '▼'}</span>
+                      <span>{Math.abs(props.priceChange)}</span>
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">
                 <div

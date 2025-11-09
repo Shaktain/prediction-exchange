@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { validateWithdrawal } from '@/lib/blockchain/validation';
 
 // GET all orders for a user or market
 export async function GET(request: NextRequest) {
@@ -8,15 +7,18 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const userId = searchParams.get('userId');
     const marketId = searchParams.get('marketId');
+    
     if (!userId && !marketId) {
       return NextResponse.json(
         { error: 'userId or marketId required' },
         { status: 400 }
       );
     }
+    
     const where: any = {};
     if (userId) where.userId = userId;
     if (marketId) where.marketId = parseInt(marketId);
+    
     const orders = await prisma.order.findMany({
       where,
       include: {
@@ -26,6 +28,7 @@ export async function GET(request: NextRequest) {
         createdAt: 'desc'
       }
     });
+    
     return NextResponse.json({ orders });
   } catch (error) {
     console.error('Error fetching orders:', error);
@@ -40,7 +43,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { userId, marketId, side, direction, type, price, quantity } = body;
+    const { userId, marketId, side, direction, type, price, quantity, mode = 'demo' } = body;
     
     // Validation
     if (!userId || !marketId || !side || !direction || !type || !price || !quantity) {
@@ -49,29 +52,40 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    
     if (side !== 'yes' && side !== 'no') {
       return NextResponse.json(
         { error: 'Invalid side. Must be yes or no' },
         { status: 400 }
       );
     }
+    
     if (direction !== 'buy' && direction !== 'sell') {
       return NextResponse.json(
         { error: 'Invalid direction. Must be buy or sell' },
         { status: 400 }
       );
     }
+    
     if (type !== 'limit' && type !== 'market') {
       return NextResponse.json(
         { error: 'Invalid type. Must be limit or market' },
         { status: 400 }
       );
     }
+
+    if (mode !== 'demo' && mode !== 'real') {
+      return NextResponse.json(
+        { error: 'Invalid mode. Must be demo or real' },
+        { status: 400 }
+      );
+    }
     
-    // Check user has sufficient balance
+    // Get user and position
     const user = await prisma.user.findUnique({
       where: { id: userId }
     });
+    
     if (!user) {
       return NextResponse.json(
         { error: 'User not found' },
@@ -79,24 +93,61 @@ export async function POST(request: NextRequest) {
       );
     }
     
+    const position = await prisma.position.findUnique({
+      where: { userId_marketId: { userId, marketId: parseInt(marketId) } }
+    });
+    
+    // Get correct balances based on mode
+    const totalBalance = mode === 'demo' 
+      ? Number(user.demoBalance) 
+      : Number(user.usdcBalance);
+    
+    const lockedBalance = mode === 'demo'
+      ? Number(user.demoLockedBalance)
+      : Number(user.realLockedBalance);
+    
+    const availableBalance = totalBalance - lockedBalance;
+    const field = side === 'yes' ? 'yesShares' : 'noShares';
+    const currentShares = position ? Number(position[field]) : 0;
+    
+    console.log(`💰 Order Validation - Mode: ${mode}, Available: ${availableBalance}, Locked: ${lockedBalance}`);
+    
     if (direction === 'buy') {
+      // BUYING: Need balance to pay for shares
       const cost = price * quantity;
-      const availableBalance = Number(user.usdcBalance) - Number(user.lockedBalance);
+      
       if (availableBalance < cost) {
         return NextResponse.json(
-          { error: 'Insufficient balance' },
+          { error: `Insufficient ${mode} balance. Need $${cost.toFixed(2)}, have $${availableBalance.toFixed(2)}` },
           { status: 400 }
         );
       }
     } else {
-      // Short selling - lock collateral
-      const cost = (1 - price) * quantity;
-      const availableBalance = Number(user.usdcBalance) - Number(user.lockedBalance);
-      if (availableBalance < cost) {
-        return NextResponse.json(
-          { error: 'Insufficient balance for short position' },
-          { status: 400 }
-        );
+      // SELLING: Two scenarios
+      
+      if (currentShares >= quantity) {
+        // SCENARIO 1: Closing existing long position (have shares to sell)
+        // No additional balance needed - just selling what we own
+        console.log(`  ✓ Selling owned shares: ${currentShares} >= ${quantity}`);
+      } else {
+        // SCENARIO 2: Short selling (don't have enough shares)
+        const shortQuantity = quantity - currentShares;
+        
+        // For short selling, need collateral to cover max loss
+        // Max loss = if wrong, pay $1 per share
+        // Collateral needed = shortQuantity × (1 - price)
+        const collateralNeeded = shortQuantity * (1 - price);
+        
+        console.log(`  ⚠️ Short selling: need collateral ${collateralNeeded.toFixed(2)}`);
+        
+        if (availableBalance < collateralNeeded) {
+          return NextResponse.json(
+            { 
+              error: `Insufficient ${mode} collateral for short sale. Need $${collateralNeeded.toFixed(2)}, have $${availableBalance.toFixed(2)}. You're short selling ${shortQuantity} shares.` 
+            },
+            { status: 400 }
+          );
+        }
       }
     }
     
@@ -115,17 +166,40 @@ export async function POST(request: NextRequest) {
       }
     });
     
-    // Lock funds
-    const cost = direction === 'buy' ? (price * quantity) : ((1 - price) * quantity);
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        lockedBalance: { increment: cost }
+    console.log(`📝 Order created: ${order.id}`);
+    
+    // Lock funds in correct balance
+    let lockAmount = 0;
+    if (direction === 'buy') {
+      lockAmount = price * quantity;
+    } else {
+      // Only lock collateral for short portion
+      const shortQuantity = Math.max(0, quantity - currentShares);
+      lockAmount = shortQuantity * (1 - price);
+    }
+    
+    if (lockAmount > 0) {
+      console.log(`🔒 Locking ${lockAmount.toFixed(2)} in ${mode} mode`);
+      
+      if (mode === 'demo') {
+        await prisma.user.update({
+          where: { id: userId },
+          data: {
+            demoLockedBalance: { increment: lockAmount }
+          }
+        });
+      } else {
+        await prisma.user.update({
+          where: { id: userId },
+          data: {
+            realLockedBalance: { increment: lockAmount }
+          }
+        });
       }
-    });
+    }
     
     // Try to match the order
-    await matchOrder(prisma, order, parseInt(marketId));
+    await matchOrder(prisma, order, parseInt(marketId), mode);
     
     // Update liquidity
     await updateLiquidity(prisma, parseInt(marketId));
@@ -148,26 +222,56 @@ export async function DELETE(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const orderId = searchParams.get('orderId');
+    const mode = searchParams.get('mode') || 'demo';
+    
     if (!orderId) {
       return NextResponse.json(
         { error: 'orderId required' },
         { status: 400 }
       );
     }
+    
     const order = await prisma.order.findUnique({
       where: { id: orderId }
     });
+    
     if (!order) {
       return NextResponse.json(
         { error: 'Order not found' },
         { status: 404 }
       );
     }
+    
     if (order.status !== 'open' && order.status !== 'partial') {
       return NextResponse.json(
         { error: 'Cannot cancel non-open order' },
         { status: 400 }
       );
+    }
+    
+    // Get user's position to calculate unlock amount correctly
+    const position = await prisma.position.findUnique({
+      where: { 
+        userId_marketId: { 
+          userId: order.userId, 
+          marketId: order.marketId 
+        } 
+      }
+    });
+    
+    const field = order.side === 'yes' ? 'yesShares' : 'noShares';
+    const currentShares = position ? Number(position[field]) : 0;
+    
+    // Calculate locked amount
+    let lockedAmount = 0;
+    if (order.direction === 'buy') {
+      lockedAmount = Number(order.price) * Number(order.remaining);
+    } else {
+      const orderQty = Number(order.quantity);
+      const remainingQty = Number(order.remaining);
+      const shortQuantity = Math.max(0, orderQty - currentShares);
+      const remainingShort = (remainingQty / orderQty) * shortQuantity;
+      lockedAmount = remainingShort * (1 - Number(order.price));
     }
     
     // Cancel order
@@ -176,17 +280,24 @@ export async function DELETE(request: NextRequest) {
       data: { status: 'cancelled' }
     });
     
-    // Unlock funds
-    const lockedAmount = order.direction === 'buy' 
-      ? Number(order.price) * Number(order.remaining)
-      : (1 - Number(order.price)) * Number(order.remaining);
-      
-    await prisma.user.update({
-      where: { id: order.userId },
-      data: {
-        lockedBalance: { decrement: lockedAmount }
+    // Unlock funds from correct balance
+    if (lockedAmount > 0) {
+      if (mode === 'demo') {
+        await prisma.user.update({
+          where: { id: order.userId },
+          data: {
+            demoLockedBalance: { decrement: lockedAmount }
+          }
+        });
+      } else {
+        await prisma.user.update({
+          where: { id: order.userId },
+          data: {
+            realLockedBalance: { decrement: lockedAmount }
+          }
+        });
       }
-    });
+    }
     
     // Update liquidity
     await updateLiquidity(prisma, order.marketId);
@@ -205,9 +316,18 @@ export async function DELETE(request: NextRequest) {
 }
 
 // ============================================================================
-// MATCHING ENGINE
+// MATCHING ENGINE WITH MODE SUPPORT
 // ============================================================================
-async function matchOrder(prisma: any, newOrder: any, marketId: number) {
+async function matchOrder(prisma: any, newOrder: any, marketId: number, mode: string) {
+  console.log('🔍 MATCHING ORDER:', {
+    orderId: newOrder.id,
+    side: newOrder.side,
+    direction: newOrder.direction,
+    price: newOrder.price,
+    quantity: newOrder.quantity,
+    mode
+  });
+
   const oppositeDirection = newOrder.direction === 'buy' ? 'sell' : 'buy';
   
   const opposingOrders = await prisma.order.findMany({
@@ -222,6 +342,8 @@ async function matchOrder(prisma: any, newOrder: any, marketId: number) {
       ? [{ price: 'asc' }, { createdAt: 'asc' }]
       : [{ price: 'desc' }, { createdAt: 'asc' }]
   });
+  
+  console.log(`📊 Found ${opposingOrders.length} opposing orders`);
   
   let remainingQty = Number(newOrder.remaining);
   
@@ -242,6 +364,8 @@ async function matchOrder(prisma: any, newOrder: any, marketId: number) {
     
     const matchQty = Math.min(remainingQty, Number(opposingOrder.remaining));
     const executionPrice = oppPrice;
+    
+    console.log(`✅ MATCH! quantity=${matchQty}, executionPrice=${executionPrice}`);
     
     const buyOrder = newOrder.direction === 'buy' ? newOrder : opposingOrder;
     const sellOrder = newOrder.direction === 'sell' ? newOrder : opposingOrder;
@@ -284,13 +408,15 @@ async function matchOrder(prisma: any, newOrder: any, marketId: number) {
       }
     });
     
-    // Settle trades
-    await settleTradeForBuyer(prisma, buyOrder.userId, marketId, newOrder.side, matchQty, executionPrice);
-    await settleTradeForSeller(prisma, sellOrder.userId, marketId, newOrder.side, matchQty, executionPrice);
+    // Settle trades with FIFO logic
+    await settleTradeForBuyer(prisma, buyOrder.userId, marketId, newOrder.side, matchQty, executionPrice, mode);
+    await settleTradeForSeller(prisma, sellOrder.userId, marketId, newOrder.side, matchQty, executionPrice, mode);
     
     // Update market stats
     await updateMarketStats(prisma, marketId, matchQty, buyOrder.userId, sellOrder.userId);
   }
+  
+  console.log(`🏁 Matching complete. Remaining: ${remainingQty}`);
 }
 
 async function settleTradeForBuyer(
@@ -299,17 +425,31 @@ async function settleTradeForBuyer(
   marketId: number,
   side: string,
   quantity: number,
-  price: number
+  price: number,
+  mode: string
 ) {
+  console.log(`💰 SETTLE BUYER - userId: ${userId}, mode: ${mode}, qty: ${quantity}, price: ${price}`);
+  
   const cost = quantity * price;
   
-  // Unlock the buyer's locked funds (they paid for shares)
-  await prisma.user.update({
-    where: { id: userId },
-    data: { 
-      lockedBalance: { decrement: cost }
-    }
-  });
+  // Unlock the buyer's locked funds from correct balance
+  if (mode === 'demo') {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { 
+        demoLockedBalance: { decrement: cost }
+      }
+    });
+  } else {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { 
+        realLockedBalance: { decrement: cost }
+      }
+    });
+  }
+  
+  console.log(`  ✓ Unlocked ${cost} from ${mode} locked balance`);
   
   // Update or create position
   const position = await prisma.position.findUnique({
@@ -322,19 +462,54 @@ async function settleTradeForBuyer(
   if (position) {
     const currentShares = Number(position[field]);
     const currentCost = Number(position[costField]);
-    const newShares = currentShares + quantity;
-    const newAvgCost = newShares > 0 
-      ? ((currentShares * currentCost) + (quantity * price)) / newShares 
-      : 0;
     
-    await prisma.position.update({
-      where: { id: position.id },
-      data: {
-        [field]: newShares,
-        [costField]: newAvgCost
+    if (currentShares < 0) {
+      // Buying back a short - FIFO
+      const closingQty = Math.min(quantity, Math.abs(currentShares));
+      const openingQty = quantity - closingQty;
+      const realizedPnL = closingQty * (currentCost - price);
+      
+      const newShares = currentShares + quantity;
+      const newAvgCost = newShares > 0 ? (openingQty * price) / newShares : newShares < 0 ? currentCost : 0;
+      
+      await prisma.position.update({
+        where: { id: position.id },
+        data: {
+          [field]: newShares,
+          [costField]: newAvgCost,
+          realizedPnL: { increment: realizedPnL }
+        }
+      });
+      
+      // Add P&L to correct balance
+      if (realizedPnL !== 0) {
+        if (mode === 'demo') {
+          await prisma.user.update({
+            where: { id: userId },
+            data: { demoBalance: { increment: realizedPnL } }
+          });
+        } else {
+          await prisma.user.update({
+            where: { id: userId },
+            data: { usdcBalance: { increment: realizedPnL } }
+          });
+        }
       }
-    });
+    } else {
+      // Adding to long position
+      const newShares = currentShares + quantity;
+      const newAvgCost = ((currentShares * currentCost) + (quantity * price)) / newShares;
+      
+      await prisma.position.update({
+        where: { id: position.id },
+        data: {
+          [field]: newShares,
+          [costField]: newAvgCost
+        }
+      });
+    }
   } else {
+    // New position
     await prisma.position.create({
       data: {
         userId,
@@ -346,6 +521,8 @@ async function settleTradeForBuyer(
       }
     });
   }
+  
+  console.log(`✅ BUYER SETTLEMENT COMPLETE`);
 }
 
 async function settleTradeForSeller(
@@ -354,61 +531,103 @@ async function settleTradeForSeller(
   marketId: number,
   side: string,
   quantity: number,
-  price: number
+  price: number,
+  mode: string
 ) {
-  const proceeds = quantity * price;
-  const collateral = quantity * (1 - price);
+  console.log(`💵 SETTLE SELLER - userId: ${userId}, mode: ${mode}, qty: ${quantity}, price: ${price}`);
   
-  // Check if seller has existing position (closing a long) or is short selling
+  const proceeds = quantity * price;
+  
   const position = await prisma.position.findUnique({
     where: { userId_marketId: { userId, marketId } }
   });
   
   const field = side === 'yes' ? 'yesShares' : 'noShares';
+  const costField = side === 'yes' ? 'avgYesCost' : 'avgNoCost';
   const currentShares = position ? Number(position[field]) : 0;
+  const avgCost = position ? Number(position[costField]) : 0;
   
-  if (currentShares >= quantity) {
-    // Closing a long position - unlock original cost + profit
-    const costField = side === 'yes' ? 'avgYesCost' : 'avgNoCost';
-    const avgCost = position ? Number(position[costField]) : 0;
-    const originalCost = avgCost * quantity;
-    const profit = proceeds - originalCost;
+  if (currentShares > 0) {
+    // Closing long position - FIFO
+    const closingQty = Math.min(quantity, currentShares);
+    const shortingQty = quantity - closingQty;
+    const costBasis = avgCost * closingQty;
+    const realizedPnL = proceeds - costBasis - (shortingQty * price);
     
-    // Add proceeds to available balance
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        usdcBalance: { increment: proceeds },
-        lockedBalance: { decrement: originalCost } // Unlock original investment
-      }
-    });
+    // Add proceeds to correct balance
+    if (mode === 'demo') {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { demoBalance: { increment: proceeds } }
+      });
+    } else {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { usdcBalance: { increment: proceeds } }
+      });
+    }
     
-    // Reduce position
     const newShares = currentShares - quantity;
-    await prisma.position.update({
-      where: { id: position!.id },
-      data: {
-        [field]: newShares
-      }
-    });
-  } else {
-    // Short selling - unlock collateral when position is closed later
-    // For now, seller receives proceeds but collateral stays locked
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        usdcBalance: { increment: proceeds },
-        lockedBalance: { decrement: collateral } // Unlock collateral
-      }
-    });
     
-    // Track short position (negative shares)
-    const shortQuantity = quantity - currentShares;
     if (position) {
       await prisma.position.update({
         where: { id: position.id },
         data: {
-          [field]: { decrement: shortQuantity }
+          [field]: newShares,
+          realizedPnL: { increment: realizedPnL }
+        }
+      });
+    }
+    
+    // Unlock collateral for short portion
+    if (shortingQty > 0) {
+      const collateral = shortingQty * (1 - price);
+      if (mode === 'demo') {
+        await prisma.user.update({
+          where: { id: userId },
+          data: { demoLockedBalance: { decrement: collateral } }
+        });
+      } else {
+        await prisma.user.update({
+          where: { id: userId },
+          data: { realLockedBalance: { decrement: collateral } }
+        });
+      }
+    }
+  } else {
+    // Opening/adding to short
+    const collateral = quantity * (1 - price);
+    
+    if (mode === 'demo') {
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          demoBalance: { increment: proceeds },
+          demoLockedBalance: { decrement: collateral }
+        }
+      });
+    } else {
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          usdcBalance: { increment: proceeds },
+          realLockedBalance: { decrement: collateral }
+        }
+      });
+    }
+    
+    if (position) {
+      const newShares = currentShares - quantity;
+      const totalShares = Math.abs(newShares);
+      const newAvgCost = totalShares > 0
+        ? ((Math.abs(currentShares) * avgCost) + (quantity * price)) / totalShares
+        : 0;
+      
+      await prisma.position.update({
+        where: { id: position.id },
+        data: {
+          [field]: newShares,
+          [costField]: newAvgCost
         }
       });
     } else {
@@ -416,14 +635,16 @@ async function settleTradeForSeller(
         data: {
           userId,
           marketId,
-          yesShares: side === 'yes' ? -shortQuantity : 0,
-          noShares: side === 'no' ? -shortQuantity : 0,
-          avgYesCost: 0,
-          avgNoCost: 0
+          yesShares: side === 'yes' ? -quantity : 0,
+          noShares: side === 'no' ? -quantity : 0,
+          avgYesCost: side === 'yes' ? price : 0,
+          avgNoCost: side === 'no' ? price : 0
         }
       });
     }
   }
+  
+  console.log(`✅ SELLER SETTLEMENT COMPLETE`);
 }
 
 async function updateMarketStats(
@@ -434,7 +655,6 @@ async function updateMarketStats(
   sellerUserId: string
 ) {
   try {
-    // Get all trades for unique trader count
     const allTrades = await prisma.trade.findMany({
       where: { marketId },
       select: { buyerUserId: true, sellerUserId: true }
@@ -446,7 +666,6 @@ async function updateMarketStats(
       uniqueTraders.add(trade.sellerUserId);
     });
     
-    // Get current volume
     const market = await prisma.market.findUnique({
       where: { id: marketId },
       select: { totalVolume: true }
@@ -499,11 +718,36 @@ async function recordPriceHistory(
   quantity: number
 ) {
   try {
+    const market = await prisma.market.findUnique({
+      where: { id: marketId },
+      select: { yesPrice: true, noPrice: true }
+    });
+    
+    if (!market) return;
+    
+    if (side === 'yes') {
+      await prisma.market.update({
+        where: { id: marketId },
+        data: { 
+          yesPrice: price,
+          noPrice: 1 - price
+        }
+      });
+    } else {
+      await prisma.market.update({
+        where: { id: marketId },
+        data: { 
+          noPrice: price,
+          yesPrice: 1 - price
+        }
+      });
+    }
+    
     await prisma.priceHistory.create({
       data: {
         marketId,
-        yesPrice: side === 'yes' ? price : 0,
-        noPrice: side === 'no' ? price : 0,
+        yesPrice: side === 'yes' ? price : (1 - price),
+        noPrice: side === 'no' ? price : (1 - price),
         volume: quantity,
         timestamp: new Date()
       }

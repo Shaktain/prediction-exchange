@@ -8,19 +8,30 @@ datasource db {
 }
 
 model User {
-  id            String   @id @default(cuid())
-  email         String?  @unique
-  walletAddress String   @unique
-  passwordHash  String?
-  usdcBalance   Decimal  @default(0)
-  lockedBalance Decimal  @default(0)
-  fiatBalance   Decimal  @default(0)
-  kycStatus     String   @default("pending")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  orders        Order[]
-  positions     Position[]
-  transactions  Transaction[]
+  id                  String       @id @default(cuid())
+  email               String?      @unique
+  walletAddress       String       @unique
+  passwordHash        String?
+  
+  // Real Trading (USDC)
+  usdcBalance         Decimal      @default(0) @db.Decimal(18, 6)
+  realLockedBalance   Decimal      @default(0) @db.Decimal(18, 6)
+  
+  // Demo Trading
+  demoBalance         Decimal      @default(10000) @db.Decimal(18, 6)
+  demoLockedBalance   Decimal      @default(0) @db.Decimal(18, 6)
+  
+  // Legacy (can remove after migration)
+  lockedBalance       Decimal      @default(0) @db.Decimal(18, 6)
+  fiatBalance         Decimal      @default(0) @db.Decimal(18, 6)
+  
+  kycStatus           String       @default("pending")
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  
+  orders              Order[]
+  positions           Position[]
+  transactions        Transaction[]
 }
 
 model MarketGroup {
