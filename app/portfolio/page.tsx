@@ -11,8 +11,8 @@ interface Position {
   marketId: number;
   yesShares: number;
   noShares: number;
-  averageYesPrice: number;
-  averageNoPrice: number;
+  avgYesCost: number;      // ← FIXED: was averageYesPrice
+  avgNoCost: number;       // ← FIXED: was averageNoPrice
   mode: string;
   market: {
     id: number;
@@ -99,18 +99,18 @@ export default function PortfolioPage() {
       const outcome = position.market.outcome;
       if (outcome === true) {
         // YES won
-        const profit = position.yesShares - (position.yesShares * position.averageYesPrice);
+        const profit = position.yesShares - (position.yesShares * position.avgYesCost);
         return profit;
       } else if (outcome === false) {
         // NO won
-        const profit = position.noShares - (position.noShares * position.averageNoPrice);
+        const profit = position.noShares - (position.noShares * position.avgNoCost);
         return profit;
       }
       return 0;
     } else {
       // Active market - calculate unrealized P&L
-      const yesPnL = position.yesShares * (position.market.yesPrice - position.averageYesPrice);
-      const noPnL = position.noShares * (position.market.noPrice - position.averageNoPrice);
+      const yesPnL = position.yesShares * (position.market.yesPrice - position.avgYesCost);
+      const noPnL = position.noShares * (position.market.noPrice - position.avgNoCost);
       return yesPnL + noPnL;
     }
   };
@@ -308,8 +308,8 @@ export default function PortfolioPage() {
                           )}
                         </td>
                         <td className="py-3 px-4 text-right text-sm text-gray-600">
-                          {position.yesShares > 0 && `$${Number(position.averageYesPrice).toFixed(2)}`}
-                          {position.noShares > 0 && `$${Number(position.averageNoPrice).toFixed(2)}`}
+                          {position.yesShares > 0 && `$${Number(position.avgYesCost).toFixed(2)}`}
+                          {position.noShares > 0 && `$${Number(position.avgNoCost).toFixed(2)}`}
                         </td>
                         <td className="py-3 px-4 text-right text-sm text-gray-600">
                           {!position.market.resolved ? (
@@ -325,7 +325,7 @@ export default function PortfolioPage() {
                         </td>
                         <td className="py-3 px-4 text-right">
                           <span className={`font-semibold ${pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}
+                            {pnl >= 0 ? '+' : ''}${Math.abs(pnl).toFixed(2)}
                           </span>
                         </td>
                       </tr>

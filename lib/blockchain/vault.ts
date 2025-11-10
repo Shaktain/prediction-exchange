@@ -20,6 +20,7 @@ const USDC_ABI = [
 ];
 
 export function getProvider() {
+  // Add timestamp to prevent caching
   return new ethers.JsonRpcProvider('https://sepolia.base.org');
 }
 
@@ -33,18 +34,55 @@ export function getUSDCContract(signerOrProvider: any) {
 
 export { VAULT_ADDRESS, USDC_ADDRESS };
 
-// Add to existing vault.ts
-
+/**
+ * Get user's balance in the vault contract
+ * Waits for latest block to avoid stale data
+ */
 export async function getOnChainBalance(userAddress: string): Promise<number> {
-  const provider = getProvider();
-  const vault = getVaultContract(provider);
-  const balance = await vault.balances(userAddress);
-  return Number(ethers.formatUnits(balance, 6)); // USDC has 6 decimals
+  try {
+    const provider = getProvider();
+    
+    // Wait for the latest block to ensure we get fresh data
+    await provider.getBlockNumber();
+    
+    const vault = getVaultContract(provider);
+    
+    // Force latest block
+    const balance = await vault.balances(userAddress, { 
+      blockTag: 'latest' 
+    });
+    
+    const formattedBalance = Number(ethers.formatUnits(balance, 6));
+    
+    console.log(`🏦 Vault balance for ${userAddress}: ${formattedBalance} USDC`);
+    
+    return formattedBalance;
+  } catch (error) {
+    console.error('Error reading vault balance:', error);
+    throw error;
+  }
 }
 
+/**
+ * Get user's USDC balance in their wallet
+ */
 export async function getUSDCBalance(userAddress: string): Promise<number> {
-  const provider = getProvider();
-  const usdc = getUSDCContract(provider);
-  const balance = await usdc.balanceOf(userAddress);
-  return Number(ethers.formatUnits(balance, 6));
+  try {
+    const provider = getProvider();
+    await provider.getBlockNumber(); // Ensure latest
+    
+    const usdc = getUSDCContract(provider);
+    const balance = await usdc.balanceOf(userAddress, {
+      blockTag: 'latest'
+    });
+    
+    const formattedBalance = Number(ethers.formatUnits(balance, 6));
+    
+    console.log(`💳 Wallet USDC for ${userAddress}: ${formattedBalance} USDC`);
+    
+    return formattedBalance;
+  } catch (error) {
+    console.error('Error reading wallet USDC:', error);
+    throw error;
+  }
 }

@@ -1,13 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
+// Market Maker Helper Functions
+const MARKET_MAKER_WALLET = '0xMARKET_MAKER_SYSTEM';
+let marketMakerIdCache: string | null = null;
+
+async function getMarketMakerId(prisma: any): Promise<string | null> {
+  if (marketMakerIdCache) return marketMakerIdCache;
+  
+  const marketMaker = await prisma.user.findUnique({
+    where: { walletAddress: MARKET_MAKER_WALLET }
+  });
+  
+  if (marketMaker) {
+    marketMakerIdCache = marketMaker.id;
+  }
+  
+  return marketMakerIdCache;
+}
+
+async function isMarketMaker(prisma: any, userId: string): Promise<boolean> {
+  const marketMakerId = await getMarketMakerId(prisma);
+  return marketMakerId === userId;
+}
+
 // GET all orders for a user or market
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const userId = searchParams.get('userId');
     const marketId = searchParams.get('marketId');
-    const mode = searchParams.get('mode') || 'demo'; // ← ADD THIS
+    const mode = searchParams.get('mode') || 'demo';
     
     if (!userId && !marketId) {
       return NextResponse.json(
@@ -16,11 +39,11 @@ export async function GET(request: NextRequest) {
       );
     }
     
-    const where: any = { mode }; // ← ADD mode to where clause
+    const where: any = { mode };
     if (userId) where.userId = userId;
     if (marketId) where.marketId = parseInt(marketId);
-
-    console.log('📋 Fetching orders with filter:', where); // ← ADD for debugging
+    
+    console.log('📋 Fetching orders with filter:', where);
     
     const orders = await prisma.order.findMany({
       where,
@@ -32,8 +55,8 @@ export async function GET(request: NextRequest) {
       }
     });
     
-    console.log(`✅ Found ${orders.length} orders for mode: ${mode}`); // ← ADD for debugging
-
+    console.log(`✅ Found ${orders.length} orders for mode: ${mode}`);
+    
     return NextResponse.json({ orders });
   } catch (error) {
     console.error('Error fetching orders:', error);
@@ -103,7 +126,7 @@ export async function POST(request: NextRequest) {
         userId_marketId_mode: { 
           userId, 
           marketId: parseInt(marketId),
-          mode // ← Include mode
+          mode
         } 
       }
     });
@@ -174,7 +197,7 @@ export async function POST(request: NextRequest) {
         quantity,
         remaining: quantity,
         status: 'open',
-        mode // ← Store the mode with order
+        mode
       }
     });
     
@@ -267,7 +290,7 @@ export async function DELETE(request: NextRequest) {
         userId_marketId_mode: { 
           userId: order.userId, 
           marketId: order.marketId,
-          mode // ← Include mode
+          mode
         } 
       }
     });
@@ -329,7 +352,7 @@ export async function DELETE(request: NextRequest) {
 }
 
 // ============================================================================
-// MATCHING ENGINE WITH MODE SUPPORT
+// MATCHING ENGINE WITH MODE SUPPORT AND MARKET MAKER SKIP
 // ============================================================================
 async function matchOrder(prisma: any, newOrder: any, marketId: number, mode: string) {
   console.log('🔍 MATCHING ORDER:', {
@@ -349,7 +372,7 @@ async function matchOrder(prisma: any, newOrder: any, marketId: number, mode: st
       marketId,
       side: newOrder.side,
       direction: oppositeDirection,
-      mode: mode, // ← Only match same mode
+      mode: mode,
       status: { in: ['open', 'partial'] },
       remaining: { gt: 0 }
     },
@@ -396,7 +419,7 @@ async function matchOrder(prisma: any, newOrder: any, marketId: number, mode: st
         side: newOrder.side,
         price: executionPrice,
         quantity: matchQty,
-        mode // ← Store the mode with trade
+        mode
       }
     });
     
@@ -424,9 +447,24 @@ async function matchOrder(prisma: any, newOrder: any, marketId: number, mode: st
       }
     });
     
-    // Settle trades with FIFO logic
-    await settleTradeForBuyer(prisma, buyOrder.userId, marketId, newOrder.side, matchQty, executionPrice, mode);
-    await settleTradeForSeller(prisma, sellOrder.userId, marketId, newOrder.side, matchQty, executionPrice, mode);
+    // Settle trades with FIFO logic - BUT SKIP MARKET MAKER
+    const buyerIsMarketMaker = await isMarketMaker(prisma, buyOrder.userId);
+    const sellerIsMarketMaker = await isMarketMaker(prisma, sellOrder.userId);
+    
+    // Only settle for real users, not market maker
+    if (!buyerIsMarketMaker) {
+      console.log(`  💰 Settling for buyer: ${buyOrder.userId}`);
+      await settleTradeForBuyer(prisma, buyOrder.userId, marketId, newOrder.side, matchQty, executionPrice, mode);
+    } else {
+      console.log(`  🤖 Skipping settlement for market maker (buyer)`);
+    }
+    
+    if (!sellerIsMarketMaker) {
+      console.log(`  💵 Settling for seller: ${sellOrder.userId}`);
+      await settleTradeForSeller(prisma, sellOrder.userId, marketId, newOrder.side, matchQty, executionPrice, mode);
+    } else {
+      console.log(`  🤖 Skipping settlement for market maker (seller)`);
+    }
     
     // Update market stats
     await updateMarketStats(prisma, marketId, matchQty, buyOrder.userId, sellOrder.userId);
@@ -448,24 +486,26 @@ async function settleTradeForBuyer(
   
   const cost = quantity * price;
   
-  // Unlock the buyer's locked funds from correct balance
+  // Unlock the buyer's locked funds AND deduct from balance
   if (mode === 'demo') {
     await prisma.user.update({
       where: { id: userId },
       data: { 
-        demoLockedBalance: { decrement: cost }
+        demoLockedBalance: { decrement: cost },
+        demoBalance: { decrement: cost }
       }
     });
   } else {
     await prisma.user.update({
       where: { id: userId },
       data: { 
-        realLockedBalance: { decrement: cost }
+        realLockedBalance: { decrement: cost },
+        usdcBalance: { decrement: cost }
       }
     });
   }
   
-  console.log(`  ✓ Unlocked ${cost} from ${mode} locked balance`);
+  console.log(`  ✓ Unlocked and deducted ${cost} from ${mode} balance`);
   
   // Update or create position
   const position = await prisma.position.findUnique({
@@ -473,7 +513,7 @@ async function settleTradeForBuyer(
       userId_marketId_mode: { 
         userId, 
         marketId,
-        mode // ← Include mode in lookup
+        mode
       } 
     }
   });
@@ -536,7 +576,7 @@ async function settleTradeForBuyer(
       data: {
         userId,
         marketId,
-        mode, // ← Store mode with position
+        mode,
         yesShares: side === 'yes' ? quantity : 0,
         noShares: side === 'no' ? quantity : 0,
         avgYesCost: side === 'yes' ? price : 0,
@@ -566,7 +606,7 @@ async function settleTradeForSeller(
       userId_marketId_mode: { 
         userId, 
         marketId,
-        mode // ← Include mode in lookup
+        mode
       } 
     }
   });
@@ -664,7 +704,7 @@ async function settleTradeForSeller(
         data: {
           userId,
           marketId,
-          mode, // ← Store mode
+          mode,
           yesShares: side === 'yes' ? -quantity : 0,
           noShares: side === 'no' ? -quantity : 0,
           avgYesCost: side === 'yes' ? price : 0,

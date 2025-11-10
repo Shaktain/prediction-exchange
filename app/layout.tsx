@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from './providers';
+import '@/lib/startup/initMarketMaker'; // Add at the top with other imports
 
 export const metadata: Metadata = {
   title: "Prediction Exchange",
