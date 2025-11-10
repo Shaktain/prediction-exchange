@@ -6,6 +6,7 @@ import Header from '@/components/Header';
 import { getCategoryColor } from '@/lib/utils/market-helpers';
 import { useTrade } from '@/lib/hooks/useTrade';
 import { useAccount } from 'wagmi';
+import { useTradingMode } from '@/lib/contexts/TradingModeContext';
 import OrderBook from '@/components/OrderBook';
 import PriceChart from '@/components/PriceChart';
 
@@ -26,6 +27,7 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
   const { id } = use(params);
   const router = useRouter();
   const { address, isConnected } = useAccount();
+  const { mode, refreshBalances } = useTradingMode();
   const [market, setMarket] = useState<Market | null>(null);
   const [loading, setLoading] = useState(true);
   const [successMessage, setSuccessMessage] = useState('');
@@ -80,9 +82,9 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
               category: foundMarket.category,
               yesPrice: option.yesPrice,
               noPrice: option.noPrice,
-              totalVolume: option.totalVolume || 0, // ← NOW USES ACTUAL DATA
-              totalLiquidity: option.totalLiquidity || 0, // ← NOW USES ACTUAL DATA
-              traderCount: option.traderCount || 0, // ← NOW USES ACTUAL DATA
+              totalVolume: option.totalVolume || 0,
+              totalLiquidity: option.totalLiquidity || 0,
+              traderCount: option.traderCount || 0,
               endDate: option.endDate || new Date().toISOString()
             };
           }
@@ -92,7 +94,7 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
         
         // Fetch order book
         if (foundMarket) {
-          const obResponse = await fetch(`/api/orderbook?marketId=${parseInt(id)}`);
+          const obResponse = await fetch(`/api/orderbook?marketId=${parseInt(id)}&mode=${mode}`);
           const obData = await obResponse.json();
           setOrderBookData(obData.orderBook);
         }
@@ -103,20 +105,20 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
       }
     }
     fetchMarket();
-  }, [id]);
+  }, [id, mode]);
 
   // Separate polling for order book only
   useEffect(() => {
     if (!market) return;
 
     const interval = setInterval(async () => {
-      const obResponse = await fetch(`/api/orderbook?marketId=${market.id}`);
+      const obResponse = await fetch(`/api/orderbook?marketId=${market.id}&mode=${mode}`);
       const obData = await obResponse.json();
       setOrderBookData(obData.orderBook);
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [market?.id]);
+  }, [market?.id, mode]);
 
   // Cleanup success message
   useEffect(() => {
@@ -240,7 +242,8 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
           direction: 'buy',
           type: orderType,
           price,
-          quantity: shares
+          quantity: shares,
+          mode
         })
       });
 
@@ -251,6 +254,10 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
 
       setAmount('');
       setLimitPrice('');
+      
+      // Refresh balances to update locked amounts in header
+      await refreshBalances();
+      
     } catch (err: any) {
       console.error('Buy error:', err);
       setError(err.message || 'Failed to execute buy');
@@ -287,7 +294,8 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
           direction: 'sell',
           type: orderType,
           price,
-          quantity: shares
+          quantity: shares,
+          mode
         })
       });
 
@@ -298,6 +306,10 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
 
       setAmount('');
       setLimitPrice('');
+      
+      // Refresh balances to update locked amounts in header
+      await refreshBalances();
+      
     } catch (err: any) {
       console.error('Sell error:', err);
       setError(err.message || 'Failed to execute sell');

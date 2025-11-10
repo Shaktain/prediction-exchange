@@ -5,6 +5,7 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const marketId = searchParams.get('marketId');
+    const mode = searchParams.get('mode') || 'demo'; // ← ADD THIS
 
     if (!marketId) {
       return NextResponse.json(
@@ -13,18 +14,21 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get YES buy orders (bids)
+    console.log(`📖 Fetching order book for market ${marketId}, mode: ${mode}`);
+
+    // Get YES buy orders (bids) - FILTERED BY MODE
     const yesBids = await prisma.order.findMany({
       where: {
         marketId: parseInt(marketId),
         side: 'yes',
         direction: 'buy',
+        mode: mode, // ← ADD THIS
         status: { in: ['open', 'partial'] },
         remaining: { gt: 0 }
       },
       orderBy: [
-        { price: 'desc' }, // Best prices first (highest bids first)
-        { createdAt: 'asc' } // Time priority
+        { price: 'desc' },
+        { createdAt: 'asc' }
       ],
       select: {
         id: true,
@@ -39,18 +43,19 @@ export async function GET(request: NextRequest) {
       }
     });
 
-    // Get YES sell orders (asks)
+    // Get YES sell orders (asks) - FILTERED BY MODE
     const yesAsks = await prisma.order.findMany({
       where: {
         marketId: parseInt(marketId),
         side: 'yes',
         direction: 'sell',
+        mode: mode, // ← ADD THIS
         status: { in: ['open', 'partial'] },
         remaining: { gt: 0 }
       },
       orderBy: [
-        { price: 'asc' }, // Best prices first (lowest asks first)
-        { createdAt: 'asc' } // Time priority
+        { price: 'asc' },
+        { createdAt: 'asc' }
       ],
       select: {
         id: true,
@@ -65,18 +70,19 @@ export async function GET(request: NextRequest) {
       }
     });
 
-    // Get NO buy orders (bids)
+    // Get NO buy orders (bids) - FILTERED BY MODE
     const noBids = await prisma.order.findMany({
       where: {
         marketId: parseInt(marketId),
         side: 'no',
         direction: 'buy',
+        mode: mode, // ← ADD THIS
         status: { in: ['open', 'partial'] },
         remaining: { gt: 0 }
       },
       orderBy: [
-        { price: 'desc' }, // Best prices first (highest bids first)
-        { createdAt: 'asc' } // Time priority
+        { price: 'desc' },
+        { createdAt: 'asc' }
       ],
       select: {
         id: true,
@@ -91,18 +97,19 @@ export async function GET(request: NextRequest) {
       }
     });
 
-    // Get NO sell orders (asks)
+    // Get NO sell orders (asks) - FILTERED BY MODE
     const noAsks = await prisma.order.findMany({
       where: {
         marketId: parseInt(marketId),
         side: 'no',
         direction: 'sell',
+        mode: mode, // ← ADD THIS
         status: { in: ['open', 'partial'] },
         remaining: { gt: 0 }
       },
       orderBy: [
-        { price: 'asc' }, // Best prices first (lowest asks first)
-        { createdAt: 'asc' } // Time priority
+        { price: 'asc' },
+        { createdAt: 'asc' }
       ],
       select: {
         id: true,
@@ -125,9 +132,12 @@ export async function GET(request: NextRequest) {
       noAsks: aggregateByPrice(noAsks)
     };
 
-    // Get recent trades for price chart
+    // Get recent trades for price chart - FILTERED BY MODE
     const recentTrades = await prisma.trade.findMany({
-      where: { marketId: parseInt(marketId) },
+      where: { 
+        marketId: parseInt(marketId),
+        mode: mode // ← ADD THIS
+      },
       orderBy: { executedAt: 'desc' },
       take: 100,
       select: {
@@ -137,6 +147,8 @@ export async function GET(request: NextRequest) {
         executedAt: true
       }
     });
+
+    console.log(`✅ Order book fetched: ${yesBids.length + yesAsks.length + noBids.length + noAsks.length} orders for mode: ${mode}`);
 
     return NextResponse.json({
       orderBook,

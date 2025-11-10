@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Header from '@/components/Header';
 import { ArrowLeft, TrendingUp } from 'lucide-react';
+import { useTradingMode } from '@/lib/contexts/TradingModeContext';
 
 interface MarketOption {
   id: number;
@@ -26,6 +27,7 @@ interface MarketGroup {
 export default function MarketGroupPage() {
   const params = useParams();
   const router = useRouter();
+  const { mode } = useTradingMode();
   const [marketGroup, setMarketGroup] = useState<MarketGroup | null>(null);
   const [priceChanges, setPriceChanges] = useState<{ [key: number]: number }>({});
   const [loading, setLoading] = useState(true);
@@ -140,7 +142,7 @@ export default function MarketGroupPage() {
             return (
               <div
                 key={option.id}
-                onClick={() => router.push(`/market/${option.id}`)}
+                onClick={() => router.push(`/market/${option.id}?mode=${mode}`)}
                 className="bg-white rounded-lg shadow-md p-6 hover:shadow-xl transition-all duration-300 cursor-pointer"
               >
                 <div className="flex items-center justify-between">
@@ -192,7 +194,7 @@ export default function MarketGroupPage() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          router.push(`/market/${option.id}?side=yes&action=buy`);
+                          router.push(`/market/${option.id}?side=yes&action=buy&mode=${mode}`);
                         }}
                         className="px-6 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-lg transition border border-blue-200"
                       >
@@ -201,7 +203,7 @@ export default function MarketGroupPage() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          router.push(`/market/${option.id}?side=no&action=buy`);
+                          router.push(`/market/${option.id}?side=no&action=buy&mode=${mode}`);
                         }}
                         className="px-6 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 font-semibold rounded-lg transition border border-purple-200"
                       >

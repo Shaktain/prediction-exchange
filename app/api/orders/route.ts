@@ -7,6 +7,7 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const userId = searchParams.get('userId');
     const marketId = searchParams.get('marketId');
+    const mode = searchParams.get('mode') || 'demo'; // ← ADD THIS
     
     if (!userId && !marketId) {
       return NextResponse.json(
@@ -15,9 +16,11 @@ export async function GET(request: NextRequest) {
       );
     }
     
-    const where: any = {};
+    const where: any = { mode }; // ← ADD mode to where clause
     if (userId) where.userId = userId;
     if (marketId) where.marketId = parseInt(marketId);
+
+    console.log('📋 Fetching orders with filter:', where); // ← ADD for debugging
     
     const orders = await prisma.order.findMany({
       where,
@@ -29,6 +32,8 @@ export async function GET(request: NextRequest) {
       }
     });
     
+    console.log(`✅ Found ${orders.length} orders for mode: ${mode}`); // ← ADD for debugging
+
     return NextResponse.json({ orders });
   } catch (error) {
     console.error('Error fetching orders:', error);

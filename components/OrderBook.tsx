@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { TrendingUp, TrendingDown } from 'lucide-react';
+import { useTradingMode } from '@/lib/contexts/TradingModeContext'; // ← ADD THIS
 
 interface OrderLevel {
   price: number;
@@ -21,6 +22,7 @@ interface OrderBookProps {
 }
 
 export default function OrderBook({ marketId, selectedSide = 'yes' }: OrderBookProps) {
+  const { mode } = useTradingMode(); // ← ADD THIS
   const [orderBook, setOrderBook] = useState<OrderBookData>({
     yesBids: [],
     yesAsks: [],
@@ -34,7 +36,7 @@ export default function OrderBook({ marketId, selectedSide = 'yes' }: OrderBookP
     fetchOrderBook();
     const interval = setInterval(fetchOrderBook, 2000);
     return () => clearInterval(interval);
-  }, [marketId]);
+  }, [marketId, mode]); // ← ADD mode to dependencies
 
   useEffect(() => {
     setViewSide(selectedSide);
@@ -42,7 +44,7 @@ export default function OrderBook({ marketId, selectedSide = 'yes' }: OrderBookP
 
   async function fetchOrderBook() {
     try {
-      const response = await fetch(`/api/orderbook?marketId=${marketId}`);
+      const response = await fetch(`/api/orderbook?marketId=${marketId}&mode=${mode}`); // ← ADD mode parameter
       const data = await response.json();
       setOrderBook(data.orderBook);
       setLoading(false);
@@ -51,6 +53,7 @@ export default function OrderBook({ marketId, selectedSide = 'yes' }: OrderBookP
     }
   }
 
+  // Rest of the component stays the same...
   if (loading) {
     return (
       <div className="bg-white rounded-xl shadow-lg p-6">
