@@ -48,7 +48,11 @@ export async function GET(request: NextRequest) {
     const orders = await prisma.order.findMany({
       where,
       include: {
-        market: true
+        market: {
+          include: {
+            marketGroup: true  // Include parent market group if it exists
+          }
+        }
       },
       orderBy: {
         createdAt: 'desc'

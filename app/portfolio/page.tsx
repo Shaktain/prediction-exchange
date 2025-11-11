@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useAccount } from 'wagmi';
 import Header from '@/components/Header';
+import MyOrdersSection from '@/components/MyOrdersSection';
 import { TrendingUp, TrendingDown, DollarSign, Zap, Shield } from 'lucide-react';
 import { useTradingMode } from '@/lib/contexts/TradingModeContext';
 
@@ -11,8 +12,8 @@ interface Position {
   marketId: number;
   yesShares: number;
   noShares: number;
-  avgYesCost: number;      // ← FIXED: was averageYesPrice
-  avgNoCost: number;       // ← FIXED: was averageNoPrice
+  avgYesCost: number;
+  avgNoCost: number;
   mode: string;
   market: {
     id: number;
@@ -29,98 +30,125 @@ interface Order {
   id: string;
   marketId: number;
   side: string;
+  direction: string;
+  type: string;
   price: number;
   quantity: number;
+  filled: number;
+  remaining: number;
   status: string;
   createdAt: string;
   mode: string;
   market: {
     title: string;
     category: string;
+    optionText: string | null;
+    marketGroupId: number | null;
+    marketGroup: {
+      id: number;
+      question: string;
+    } | null;
   };
 }
 
 export default function PortfolioPage() {
   const { address, isConnected } = useAccount();
   const { mode } = useTradingMode();
-  const [userId, setUserId] = useState<number | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [balance, setBalance] = useState(0);
   const [positions, setPositions] = useState<Position[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'active' | 'resolved'>('active');
 
+  const fetchPortfolio = async () => {
+    if (!isConnected || !address) return;
+
+    try {
+      // Register/get user
+      const userResponse = await fetch('/api/users/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ walletAddress: address })
+      });
+      const userData = await userResponse.json();
+      setUserId(userData.userId);
+      
+      // Get balance based on current mode
+      const balanceAmount = mode === 'demo' 
+        ? Number(userData.user?.demoBalance || 0) - Number(userData.user?.demoLockedBalance || 0)
+        : Number(userData.user?.usdcBalance || 0) - Number(userData.user?.realLockedBalance || 0);
+      setBalance(balanceAmount);
+
+      // Fetch positions for current mode
+      const positionsResponse = await fetch(`/api/positions?userId=${userData.userId}&mode=${mode}`);
+      const positionsData = await positionsResponse.json();
+      setPositions(positionsData.positions || []);
+
+      // Fetch orders for current mode
+      const ordersResponse = await fetch(`/api/orders?userId=${userData.userId}&mode=${mode}`);
+      const ordersData = await ordersResponse.json();
+      setOrders(ordersData.orders || []);
+    } catch (error) {
+      console.error('Error fetching portfolio:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!isConnected || !address) {
       setLoading(false);
       return;
     }
-
-    async function fetchPortfolio() {
-      try {
-        // Register/get user
-        const userResponse = await fetch('/api/users/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ walletAddress: address })
-        });
-        const userData = await userResponse.json();
-        setUserId(userData.userId);
-        
-        // Get balance based on current mode
-        const balanceAmount = mode === 'demo' 
-          ? Number(userData.user?.demoBalance || 0) - Number(userData.user?.demoLockedBalance || 0)
-          : Number(userData.user?.usdcBalance || 0) - Number(userData.user?.realLockedBalance || 0);
-        setBalance(balanceAmount);
-
-        // Fetch positions for current mode
-        const positionsResponse = await fetch(`/api/positions?userId=${userData.userId}&mode=${mode}`);
-        const positionsData = await positionsResponse.json();
-        setPositions(positionsData.positions || []);
-
-        // Fetch orders for current mode
-        const ordersResponse = await fetch(`/api/orders?userId=${userData.userId}&mode=${mode}`);
-        const ordersData = await ordersResponse.json();
-        setOrders(ordersData.orders || []);
-      } catch (error) {
-        console.error('Error fetching portfolio:', error);
-      } finally {
-        setLoading(false);
-      }
-    }
-
     fetchPortfolio();
   }, [address, isConnected, mode]);
+
+  // Cancel order handler
+  const handleCancelOrder = async (orderId: string) => {
+    if (!userId) return;
+
+    try {
+      const response = await fetch(`/api/orders?orderId=${orderId}&mode=${mode}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to cancel order');
+      }
+
+      // Refresh portfolio to show updated data
+      await fetchPortfolio();
+    } catch (error) {
+      console.error('Error cancelling order:', error);
+      throw error;
+    }
+  };
 
   // Calculate P&L for a position
   const calculatePnL = (position: Position) => {
     if (position.market.resolved) {
-      // Resolved market - calculate actual profit
       const outcome = position.market.outcome;
       if (outcome === true) {
-        // YES won
         const profit = position.yesShares - (position.yesShares * position.avgYesCost);
         return profit;
       } else if (outcome === false) {
-        // NO won
         const profit = position.noShares - (position.noShares * position.avgNoCost);
         return profit;
       }
       return 0;
     } else {
-      // Active market - calculate unrealized P&L
       const yesPnL = position.yesShares * (position.market.yesPrice - position.avgYesCost);
       const noPnL = position.noShares * (position.market.noPrice - position.avgNoCost);
       return yesPnL + noPnL;
     }
   };
 
-  // Filter positions by active/resolved
   const filteredPositions = positions.filter(position => 
     activeTab === 'active' ? !position.market.resolved : position.market.resolved
   );
 
-  // Calculate total P&L
   const totalPnL = positions.reduce((sum, position) => sum + calculatePnL(position), 0);
 
   if (!isConnected) {
@@ -184,7 +212,6 @@ export default function PortfolioPage() {
 
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          {/* Balance Card */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium text-gray-600">Available Balance</span>
@@ -198,7 +225,6 @@ export default function PortfolioPage() {
             </div>
           </div>
 
-          {/* Total P&L Card */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium text-gray-600">Total P&L</span>
@@ -209,14 +235,13 @@ export default function PortfolioPage() {
               )}
             </div>
             <div className={`text-3xl font-bold ${totalPnL >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              {totalPnL >= 0 ? '+' : ''}{totalPnL.toFixed(2)}
+              {totalPnL >= 0 ? '+' : ''}${Math.abs(totalPnL).toFixed(2)}
             </div>
             <div className="text-xs text-gray-500 mt-1">
               {totalPnL >= 0 ? 'Profit' : 'Loss'}
             </div>
           </div>
 
-          {/* Active Positions Card */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium text-gray-600">Active Positions</span>
@@ -238,7 +263,6 @@ export default function PortfolioPage() {
           <div className="p-6 border-b border-gray-200">
             <h2 className="text-2xl font-bold text-gray-900 mb-4">My Positions</h2>
             
-            {/* Tabs */}
             <div className="flex gap-4 border-b border-gray-200">
               <button
                 onClick={() => setActiveTab('active')}
@@ -337,68 +361,12 @@ export default function PortfolioPage() {
           )}
         </div>
 
-        {/* Orders Section */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-          <div className="p-6 border-b border-gray-200">
-            <h2 className="text-2xl font-bold text-gray-900">My Orders</h2>
-          </div>
-
-          {orders.length === 0 ? (
-            <div className="p-8 text-center text-gray-500">
-              <p>No orders found</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="text-left py-3 px-4 font-semibold text-gray-700">Market</th>
-                    <th className="text-left py-3 px-4 font-semibold text-gray-700">Side</th>
-                    <th className="text-right py-3 px-4 font-semibold text-gray-700">Price</th>
-                    <th className="text-right py-3 px-4 font-semibold text-gray-700">Quantity</th>
-                    <th className="text-center py-3 px-4 font-semibold text-gray-700">Status</th>
-                    <th className="text-right py-3 px-4 font-semibold text-gray-700">Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {orders.map((order) => (
-                    <tr key={order.id} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="py-3 px-4">
-                        <div className="font-medium text-gray-900">{order.market.title}</div>
-                        <div className="text-xs text-gray-500">{order.market.category}</div>
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                          order.side === 'yes' 
-                            ? 'bg-green-100 text-green-700' 
-                            : 'bg-red-100 text-red-700'
-                        }`}>
-                          {order.side.toUpperCase()}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-right">${Number(order.price).toFixed(2)}</td>
-                      <td className="py-3 px-4 text-right">{Number(order.quantity).toFixed(2)}</td>
-                      <td className="py-3 px-4 text-center">
-                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                          order.status === 'open' 
-                            ? 'bg-blue-100 text-blue-700' 
-                            : order.status === 'filled'
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-gray-100 text-gray-700'
-                        }`}>
-                          {order.status}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-right text-sm text-gray-500">
-                        {new Date(order.createdAt).toLocaleDateString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+        {/* My Orders Section - New Component */}
+        <MyOrdersSection 
+          orders={orders}
+          onCancelOrder={handleCancelOrder}
+          onRefresh={fetchPortfolio}
+        />
       </main>
     </div>
   );
