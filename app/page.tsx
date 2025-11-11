@@ -4,6 +4,7 @@ import Header from '@/components/Header';
 import FilterBar from '@/components/FilterBar';
 import MarketCard from '@/components/MarketCard';
 import { CATEGORIES } from '@/lib/data/markets';
+import { DollarSign, LayoutGrid } from 'lucide-react';
 
 interface SingleMarket {
   type: 'single';
@@ -52,6 +53,7 @@ export default function Home() {
   const [markets, setMarkets] = useState<Market[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'active' | 'resolved'>('active');
+  const [showPrices, setShowPrices] = useState(false); // NEW: Toggle state
 
   // Fetch markets from API
   useEffect(() => {
@@ -173,13 +175,49 @@ export default function Home() {
           </div>
         </div>
 
-        <FilterBar
-          searchTerm={searchTerm}
-          setSearchTerm={setSearchTerm}
-          selectedCategory={selectedCategory}
-          setSelectedCategory={setSelectedCategory}
-          categories={Array.from(CATEGORIES)}
-        />
+        {/* Filter Bar with Toggle */}
+        <div className="mb-6">
+          <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
+            {/* Filter Bar */}
+            <div className="flex-1">
+              <FilterBar
+                searchTerm={searchTerm}
+                setSearchTerm={setSearchTerm}
+                selectedCategory={selectedCategory}
+                setSelectedCategory={setSelectedCategory}
+                categories={Array.from(CATEGORIES)}
+              />
+            </div>
+
+            {/* Price/Box Toggle - NEW */}
+            <div className="flex items-center gap-3 bg-white rounded-lg p-1 border border-gray-200 shadow-sm self-start lg:self-auto">
+              <button
+                onClick={() => setShowPrices(false)}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-md font-medium transition-all ${
+                  !showPrices
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+                title="Show YES/NO boxes"
+              >
+                <LayoutGrid className="w-4 h-4" />
+                <span className="text-sm font-semibold">Boxes</span>
+              </button>
+              <button
+                onClick={() => setShowPrices(true)}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-md font-medium transition-all ${
+                  showPrices
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+                title="Show prices in dollars"
+              >
+                <DollarSign className="w-4 h-4" />
+                <span className="text-sm font-semibold">Prices</span>
+              </button>
+            </div>
+          </div>
+        </div>
 
         {loading ? (
           <div className="text-center py-12">
@@ -208,6 +246,7 @@ export default function Home() {
                       outcome={market.outcome}
                       trending={market.trending}
                       priceChange={market.priceChange}
+                      showPrices={showPrices} // Pass toggle state
                     />
                   );
                 } else {
@@ -223,6 +262,7 @@ export default function Home() {
                       liquidity={formatVolume(market.totalLiquidity)}
                       category={market.category}
                       trending={market.trending}
+                      showPrices={showPrices} // Pass toggle state
                     />
                   );
                 }

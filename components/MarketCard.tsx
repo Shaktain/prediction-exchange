@@ -36,6 +36,9 @@ interface MarketCardProps {
   liquidity?: string;
   category: string;
   trending?: boolean;
+  
+  // Display mode
+  showPrices?: boolean; // NEW PROP
 }
 
 export default function MarketCard(props: MarketCardProps) {
@@ -107,12 +110,13 @@ export default function MarketCard(props: MarketCardProps) {
         <div className="space-y-2 mb-4">
           {sortedOptions.slice(0, 3).map((option) => {
             const probability = Math.round(option.yesPrice * 100);
-            const bidPrice = (option.yesPrice * 0.99).toFixed(2); // Simulated bid
+            const yesBidPrice = (option.yesPrice).toFixed(2);
+            const noBidPrice = (option.noPrice).toFixed(2);
             
             return (
               <div 
                 key={option.id}
-                className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition group"
+                className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition"
               >
                 {/* Option Text */}
                 <div className="flex-1 min-w-0">
@@ -133,21 +137,40 @@ export default function MarketCard(props: MarketCardProps) {
                     </div>
                   </div>
 
-                  {/* Yes/No Buttons */}
-                  <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={(e) => handleOptionClick(e, option.id, 'yes')}
-                      className="px-3 py-1 bg-green-100 hover:bg-green-200 text-green-700 rounded text-xs font-semibold transition"
-                    >
-                      Yes
-                    </button>
-                    <button
-                      onClick={(e) => handleOptionClick(e, option.id, 'no')}
-                      className="px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded text-xs font-semibold transition"
-                    >
-                      No
-                    </button>
-                  </div>
+                  {/* Yes/No Buttons - ALWAYS VISIBLE NOW */}
+                  {props.showPrices ? (
+                    // PRICE MODE - Show $ amounts with color
+                    <div className="flex gap-2">
+                      <button
+                        onClick={(e) => handleOptionClick(e, option.id, 'yes')}
+                        className="px-3 py-1 bg-green-50 hover:bg-green-100 text-green-700 rounded text-xs font-semibold transition border border-green-200"
+                      >
+                        ${yesBidPrice}
+                      </button>
+                      <button
+                        onClick={(e) => handleOptionClick(e, option.id, 'no')}
+                        className="px-3 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded text-xs font-semibold transition border border-red-200"
+                      >
+                        ${noBidPrice}
+                      </button>
+                    </div>
+                  ) : (
+                    // BOX MODE - Show YES/NO text
+                    <div className="flex gap-2">
+                      <button
+                        onClick={(e) => handleOptionClick(e, option.id, 'yes')}
+                        className="px-3 py-1 bg-green-100 hover:bg-green-200 text-green-700 rounded text-xs font-semibold transition"
+                      >
+                        Yes
+                      </button>
+                      <button
+                        onClick={(e) => handleOptionClick(e, option.id, 'no')}
+                        className="px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded text-xs font-semibold transition"
+                      >
+                        No
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -184,8 +207,8 @@ export default function MarketCard(props: MarketCardProps) {
   } else {
     // SINGLE MARKET CARD
     const probability = props.probability || Math.round((props.yesPrice || 0.5) * 100);
-    const yesBidPrice = ((props.yesPrice || 0.5) * 0.99).toFixed(2);
-    const noBidPrice = ((props.noPrice || 0.5) * 0.99).toFixed(2);
+    const yesBidPrice = (props.yesPrice || 0.5).toFixed(2);
+    const noBidPrice = (props.noPrice || 0.5).toFixed(2);
 
     return (
       <div 
@@ -268,32 +291,63 @@ export default function MarketCard(props: MarketCardProps) {
             </div>
 
             {/* Yes/No Boxes */}
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  router.push(`/market/${props.id}?side=yes&action=buy`);
-                }}
-                className="bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg p-3 transition group"
-              >
-                <div className="text-center">
-                  <div className="text-sm font-semibold text-green-700 mb-1">YES</div>
-                  <div className="text-xs text-green-600">${yesBidPrice}</div>
-                </div>
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  router.push(`/market/${props.id}?side=no&action=buy`);
-                }}
-                className="bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg p-3 transition group"
-              >
-                <div className="text-center">
-                  <div className="text-sm font-semibold text-red-700 mb-1">NO</div>
-                  <div className="text-xs text-red-600">${noBidPrice}</div>
-                </div>
-              </button>
-            </div>
+            {props.showPrices ? (
+              // PRICE MODE
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    router.push(`/market/${props.id}?side=yes&action=buy`);
+                  }}
+                  className="bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg p-3 transition group"
+                >
+                  <div className="text-center">
+                    <div className="text-lg font-bold text-green-700">${yesBidPrice}</div>
+                    <div className="text-xs text-green-600 mt-1">BUY YES</div>
+                  </div>
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    router.push(`/market/${props.id}?side=no&action=buy`);
+                  }}
+                  className="bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg p-3 transition group"
+                >
+                  <div className="text-center">
+                    <div className="text-lg font-bold text-red-700">${noBidPrice}</div>
+                    <div className="text-xs text-red-600 mt-1">BUY NO</div>
+                  </div>
+                </button>
+              </div>
+            ) : (
+              // BOX MODE (original)
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    router.push(`/market/${props.id}?side=yes&action=buy`);
+                  }}
+                  className="bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg p-3 transition group"
+                >
+                  <div className="text-center">
+                    <div className="text-sm font-semibold text-green-700 mb-1">YES</div>
+                    <div className="text-xs text-green-600">${yesBidPrice}</div>
+                  </div>
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    router.push(`/market/${props.id}?side=no&action=buy`);
+                  }}
+                  className="bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg p-3 transition group"
+                >
+                  <div className="text-center">
+                    <div className="text-sm font-semibold text-red-700 mb-1">NO</div>
+                    <div className="text-xs text-red-600">${noBidPrice}</div>
+                  </div>
+                </button>
+              </div>
+            )}
           </>
         )}
 
