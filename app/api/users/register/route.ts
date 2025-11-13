@@ -22,6 +22,7 @@ export async function POST(request: NextRequest) {
       user = await prisma.user.create({
         data: {
           walletAddress,
+          username: null, // Username will be set later
           demoBalance: 10000, // Demo trading balance
           demoLockedBalance: 0,
           usdcBalance: 0, // Real USDC balance (from deposits)
@@ -40,6 +41,7 @@ export async function POST(request: NextRequest) {
       user: {
         id: user.id,
         walletAddress: user.walletAddress,
+        username: user.username, // ← ADDED: Return username field
         demoBalance: Number(user.demoBalance),
         demoLockedBalance: Number(user.demoLockedBalance),
         usdcBalance: Number(user.usdcBalance),

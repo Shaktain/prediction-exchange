@@ -3,6 +3,7 @@ import { use, useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, TrendingUp, TrendingDown, Users, Clock, DollarSign } from 'lucide-react';
 import Header from '@/components/Header';
+import Comments from '@/components/Comments';
 import { getCategoryColor } from '@/lib/utils/market-helpers';
 import { useTrade } from '@/lib/hooks/useTrade';
 import { useAccount } from 'wagmi';
@@ -29,6 +30,7 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
   const { address, isConnected } = useAccount();
   const { mode, refreshBalances } = useTradingMode();
   const [market, setMarket] = useState<Market | null>(null);
+  const [marketGroupId, setMarketGroupId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [successMessage, setSuccessMessage] = useState('');
   const [tradeType, setTradeType] = useState<'buy' | 'sell'>('buy');
@@ -37,6 +39,7 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
   const [isTrading, setIsTrading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [orderBookData, setOrderBookData] = useState<any>(null);
+  const [userId, setUserId] = useState<string | null>(null);
 
   const {
     amount,
@@ -50,6 +53,30 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
     market ? Number(market.yesPrice) : 0.5,
     market ? Number(market.noPrice) : 0.5
   );
+
+  // Get userId when wallet connects
+  useEffect(() => {
+    async function fetchUserId() {
+      if (!address) {
+        setUserId(null);
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/users/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ walletAddress: address })
+        });
+        const data = await response.json();
+        setUserId(data.userId);
+      } catch (error) {
+        console.error('Error fetching user ID:', error);
+      }
+    }
+
+    fetchUserId();
+  }, [address]);
 
   useEffect(() => {
     async function fetchMarket() {
@@ -75,6 +102,7 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
         if (foundMarket && foundMarket.type === 'group') {
           const option = foundMarket.options.find((opt: any) => opt.id === parseInt(id));
           if (option) {
+            setMarketGroupId(foundMarket.id); // ← ADD THIS LINE
             foundMarket = {
               id: option.id,
               title: option.optionText, // Use optionText as title
@@ -139,7 +167,7 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
     return await userResponse.json();
   };
 
-  // Calculate live prices from order book - UPDATED VERSION
+  // Calculate live prices from order book
   const getLivePrices = () => {
     if (!orderBookData) return { 
       yesPrice: '-', 
@@ -699,6 +727,15 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
               </p>
             </div>
           </div>
+        </div>
+
+        {/* Comments Section */}
+        <div className="mt-8">
+          {marketGroupId ? (
+            <Comments marketGroupId={marketGroupId} userId={userId} />
+          ) : (
+            <Comments marketId={market.id} userId={userId} />
+          )}
         </div>
       </main>
     </div>

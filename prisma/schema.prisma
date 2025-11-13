@@ -11,6 +11,7 @@ model User {
   id                  String       @id @default(cuid())
   email               String?      @unique
   walletAddress       String       @unique
+  username            String?      @unique @db.VarChar(30)
   passwordHash        String?
   
   // Real Trading (USDC)
@@ -32,8 +33,11 @@ model User {
   orders              Order[]
   positions           Position[]
   transactions        Transaction[]
-  buyerTrades         Trade[]      @relation("BuyerTrades")   // ← ADD THIS
-  sellerTrades        Trade[]      @relation("SellerTrades")  // ← ADD THIS
+  buyerTrades         Trade[]      @relation("BuyerTrades")
+  sellerTrades        Trade[]      @relation("SellerTrades")
+  comments            Comment[]
+  
+  @@index([username])
 }
 
 model MarketGroup {
@@ -46,6 +50,7 @@ model MarketGroup {
   updatedAt   DateTime  @updatedAt
   
   markets     Market[]
+  comments    Comment[]  // ← ADDED for comments on market groups
   
   @@index([category, createdAt])
 }
@@ -81,6 +86,7 @@ model Market {
   positions       Position[]
   trades          Trade[]
   priceHistory    PriceHistory[]
+  comments        Comment[]
   
   @@index([marketGroupId, createdAt])
   @@index([category, status, volume24h])
@@ -98,14 +104,14 @@ model Order {
   filled      Decimal  @default(0) @db.Decimal(18, 6)
   remaining   Decimal  @db.Decimal(18, 6)
   status      String   // 'open', 'partial', 'filled', 'cancelled'
-  mode        String   @default("demo") // ← ADD THIS: 'demo' or 'real'
+  mode        String   @default("demo") // 'demo' or 'real'
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   
   user        User     @relation(fields: [userId], references: [id])
   market      Market   @relation(fields: [marketId], references: [id])
   
-  @@index([marketId, side, direction, status, mode]) // ← Add mode to index
+  @@index([marketId, side, direction, status, mode])
 }
 
 model Trade {
@@ -118,21 +124,21 @@ model Trade {
   side          String
   price         Decimal  @db.Decimal(18, 6)
   quantity      Decimal  @db.Decimal(18, 6)
-  mode          String   @default("demo") // ← ADD THIS: 'demo' or 'real'
+  mode          String   @default("demo") // 'demo' or 'real'
   executedAt    DateTime @default(now())
   
   market        Market   @relation(fields: [marketId], references: [id])
   buyer         User     @relation("BuyerTrades", fields: [buyerUserId], references: [id])
   seller        User     @relation("SellerTrades", fields: [sellerUserId], references: [id])
   
-  @@index([marketId, mode]) // ← Add mode to index
+  @@index([marketId, mode])
 }
 
 model Position {
   id            String   @id @default(cuid())
   userId        String
   marketId      Int
-  mode          String   @default("demo") // ← ADD THIS: 'demo' or 'real'
+  mode          String   @default("demo") // 'demo' or 'real'
   yesShares     Decimal  @default(0) @db.Decimal(18, 6)
   noShares      Decimal  @default(0) @db.Decimal(18, 6)
   avgYesCost    Decimal  @default(0) @db.Decimal(18, 6)
@@ -144,7 +150,7 @@ model Position {
   user          User     @relation(fields: [userId], references: [id])
   market        Market   @relation(fields: [marketId], references: [id])
   
-  @@unique([userId, marketId, mode]) // ← UPDATE: Add mode to unique constraint
+  @@unique([userId, marketId, mode])
 }
 
 model Transaction {
@@ -171,4 +177,32 @@ model PriceHistory {
   noPrice   Decimal
   volume    Decimal
   timestamp DateTime @default(now())
+}
+
+// ═══════════════════════════════════════════════════════════
+// UPDATED: Comments System - Works for both Markets and Market Groups
+// ═══════════════════════════════════════════════════════════
+
+model Comment {
+  id              String    @id @default(cuid())
+  marketId        Int?      // Optional - for individual markets (standalone or within group)
+  marketGroupId   Int?      // Optional - for market group pages
+  userId          String
+  parentId        String?   // For threading/replies
+  content         String    @db.Text
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  isDeleted       Boolean   @default(false)
+  
+  user            User      @relation(fields: [userId], references: [id])
+  market          Market?   @relation(fields: [marketId], references: [id])
+  marketGroup     MarketGroup? @relation(fields: [marketGroupId], references: [id])
+  parent          Comment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies         Comment[] @relation("CommentReplies")
+  
+  @@index([marketId])
+  @@index([marketGroupId])
+  @@index([userId])
+  @@index([parentId])
+  @@index([createdAt])
 }

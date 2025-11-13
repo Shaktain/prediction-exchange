@@ -1,7 +1,9 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useAccount } from 'wagmi';
 import Header from '@/components/Header';
+import Comments from '@/components/Comments';
 import { ArrowLeft, TrendingUp } from 'lucide-react';
 import { useTradingMode } from '@/lib/contexts/TradingModeContext';
 
@@ -27,10 +29,36 @@ interface MarketGroup {
 export default function MarketGroupPage() {
   const params = useParams();
   const router = useRouter();
+  const { address } = useAccount();
   const { mode } = useTradingMode();
   const [marketGroup, setMarketGroup] = useState<MarketGroup | null>(null);
   const [priceChanges, setPriceChanges] = useState<{ [key: number]: number }>({});
   const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  // Get userId when wallet connects
+  useEffect(() => {
+    async function fetchUserId() {
+      if (!address) {
+        setUserId(null);
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/users/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ walletAddress: address })
+        });
+        const data = await response.json();
+        setUserId(data.userId);
+      } catch (error) {
+        console.error('Error fetching user ID:', error);
+      }
+    }
+
+    fetchUserId();
+  }, [address]);
 
   useEffect(() => {
     async function fetchMarketGroup() {
@@ -132,7 +160,7 @@ export default function MarketGroupPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4">
+        <div className="grid grid-cols-1 gap-4 mb-8">
           {sortedOptions.map((option, index) => {
             const probability = Math.round(option.yesPrice * 100);
             const priceChange = priceChanges[option.id] || 0;
@@ -224,6 +252,9 @@ export default function MarketGroupPage() {
             );
           })}
         </div>
+
+        {/* Comments Section - ADD THIS */}
+        <Comments marketGroupId={marketGroup.id} userId={userId} />
       </main>
     </div>
   );
