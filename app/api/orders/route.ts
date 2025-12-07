@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { verifyOrderSignature, validateOrderParams, isOrderExpired } from '@/lib/signatures/verifySignature';
 
 // Market Maker Helper Functions
 const MARKET_MAKER_WALLET = '0xMARKET_MAKER_SYSTEM';
@@ -50,7 +51,7 @@ export async function GET(request: NextRequest) {
       include: {
         market: {
           include: {
-            marketGroup: true  // Include parent market group if it exists
+            marketGroup: true
           }
         }
       },
@@ -61,23 +62,42 @@ export async function GET(request: NextRequest) {
     
     console.log(`✅ Found ${orders.length} orders for mode: ${mode}`);
     
-    return NextResponse.json({ orders });
-  } catch (error) {
-    console.error('Error fetching orders:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch orders' },
-      { status: 500 }
-    );
-  }
+    // Convert BigInt fields to strings for JSON serialization
+    const serializedOrders = orders.map(order => ({
+      ...order,
+      nonce: order.nonce ? order.nonce.toString() : null,
+    }));
+
+    return NextResponse.json({ orders: serializedOrders });
+    } catch (error) {
+      console.error('Error fetching orders:', error);
+      return NextResponse.json(
+        { error: 'Failed to fetch orders' },
+        { status: 500 }
+      );
+    }
 }
 
 // POST create new order
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { userId, marketId, side, direction, type, price, quantity, mode = 'demo' } = body;
+    const { 
+      userId, 
+      marketId, 
+      side, 
+      direction, 
+      type, 
+      price, 
+      quantity, 
+      mode = 'demo',
+      signature,
+      expiration,
+      nonce,
+      userAddress
+    } = body;
     
-    // Validation
+    // Basic validation
     if (!userId || !marketId || !side || !direction || !type || !price || !quantity) {
       return NextResponse.json(
         { error: 'Missing required fields' },
@@ -111,6 +131,86 @@ export async function POST(request: NextRequest) {
         { error: 'Invalid mode. Must be demo or real' },
         { status: 400 }
       );
+    }
+
+    // ⭐ NEW: Verify signature for real money mode
+    if (mode === 'real') {
+      // Check that signature fields are present
+      if (!signature || !expiration || !nonce || !userAddress) {
+        return NextResponse.json(
+          { error: 'Signature required for real money trading' },
+          { status: 403 }
+        );
+      }
+
+      // Validate order parameters
+      const validation = validateOrderParams({
+        marketId: parseInt(marketId),
+        side,
+        direction,
+        price,
+        quantity,
+        expiration,
+        nonce,
+        signature,
+        userAddress,
+      });
+
+      if (!validation.valid) {
+        return NextResponse.json(
+          { error: validation.error },
+          { status: 400 }
+        );
+      }
+
+      // Check if order has expired
+      if (isOrderExpired(expiration)) {
+        return NextResponse.json(
+          { error: 'Order has expired' },
+          { status: 400 }
+        );
+      }
+
+      // Verify the signature
+
+      const priceInWei = Math.floor(price * 1e6);
+      const quantityInWei = Math.floor(quantity * 1e6);
+
+      const isValid = await verifyOrderSignature({
+        marketId: parseInt(marketId),
+        side,
+        direction,
+        price: priceInWei, // ✅ Now in wei (200000)
+        quantity: quantityInWei, // ✅ Now in wei (4000000)
+        expiration,
+        nonce,
+        signature,
+        userAddress,
+      });
+
+      if (!isValid) {
+        return NextResponse.json(
+          { error: 'Invalid signature - order rejected for security' },
+          { status: 403 }
+        );
+      }
+
+      // Check for nonce reuse (prevent replay attacks)
+      const existingOrder = await prisma.order.findFirst({
+        where: {
+          userId,
+          nonce: BigInt(nonce),
+        },
+      });
+
+      if (existingOrder) {
+        return NextResponse.json(
+          { error: 'Order nonce already used' },
+          { status: 400 }
+        );
+      }
+
+      console.log('✅ Signature verified for real money order');
     }
     
     // Get user and position
@@ -165,15 +265,10 @@ export async function POST(request: NextRequest) {
       
       if (currentShares >= quantity) {
         // SCENARIO 1: Closing existing long position (have shares to sell)
-        // No additional balance needed - just selling what we own
         console.log(`  ✓ Selling owned shares: ${currentShares} >= ${quantity}`);
       } else {
         // SCENARIO 2: Short selling (don't have enough shares)
         const shortQuantity = quantity - currentShares;
-        
-        // For short selling, need collateral to cover max loss
-        // Max loss = if wrong, pay $1 per share
-        // Collateral needed = shortQuantity × (1 - price)
         const collateralNeeded = shortQuantity * (1 - price);
         
         console.log(`  ⚠️ Short selling: need collateral ${collateralNeeded.toFixed(2)}`);
@@ -189,7 +284,7 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    // Create order
+    // Create order with signature fields
     const order = await prisma.order.create({
       data: {
         userId,
@@ -201,11 +296,15 @@ export async function POST(request: NextRequest) {
         quantity,
         remaining: quantity,
         status: 'open',
-        mode
+        mode,
+        // ⭐ NEW: Store signature fields
+        signature: signature || null,
+        expiration: expiration ? new Date(expiration * 1000) : null,
+        nonce: nonce ? BigInt(nonce) : null,
       }
     });
     
-    console.log(`📝 Order created: ${order.id}`);
+    console.log(`📝 Order created: ${order.id}${mode === 'real' && signature ? ' (signed)' : ''}`);
     
     // Lock funds in correct balance
     let lockAmount = 0;
@@ -245,7 +344,8 @@ export async function POST(request: NextRequest) {
     
     return NextResponse.json({
       success: true,
-      order
+      orderId: order.id,
+      message: 'Order placed successfully'
     });
   } catch (error) {
     console.error('Error creating order:', error);

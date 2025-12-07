@@ -20,6 +20,7 @@ interface SingleMarket {
   resolved: boolean;
   outcome?: boolean | null;
   trending: boolean;
+  priceChange?: number;
 }
 
 interface MarketOption {
@@ -53,7 +54,7 @@ export default function Home() {
   const [markets, setMarkets] = useState<Market[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'active' | 'resolved'>('active');
-  const [showPrices, setShowPrices] = useState(false); // NEW: Toggle state
+  const [showPrices, setShowPrices] = useState(false);
 
   // Fetch markets from API
   useEffect(() => {
@@ -61,9 +62,10 @@ export default function Home() {
       try {
         const response = await fetch('/api/markets');
         const data = await response.json();
-        setMarkets(data.markets);
+        setMarkets(data.markets || []);
       } catch (error) {
         console.error('Error fetching markets:', error);
+        setMarkets([]);
       } finally {
         setLoading(false);
       }
@@ -72,7 +74,7 @@ export default function Home() {
   }, []);
 
   // Filter markets by active/resolved tab
-  const tabFilteredMarkets = markets.filter(market => {
+  const tabFilteredMarkets = (markets || []).filter(market => {
     if (market.type === 'single') {
       if (activeTab === 'active') {
         return !market.resolved;
@@ -111,12 +113,12 @@ export default function Home() {
     }
   };
 
-  const activeCount = markets.filter(m => {
+  const activeCount = (markets || []).filter(m => {
     if (m.type === 'single') return !m.resolved;
     return m.options.some(opt => !opt.resolved);
   }).length;
   
-  const resolvedCount = markets.filter(m => {
+  const resolvedCount = (markets || []).filter(m => {
     if (m.type === 'single') return m.resolved;
     return m.options.some(opt => opt.resolved);
   }).length;
@@ -189,7 +191,7 @@ export default function Home() {
               />
             </div>
 
-            {/* Price/Box Toggle - NEW */}
+            {/* Price/Box Toggle */}
             <div className="flex items-center gap-3 bg-white rounded-lg p-1 border border-gray-200 shadow-sm self-start lg:self-auto">
               <button
                 onClick={() => setShowPrices(false)}
@@ -246,7 +248,7 @@ export default function Home() {
                       outcome={market.outcome}
                       trending={market.trending}
                       priceChange={market.priceChange}
-                      showPrices={showPrices} // Pass toggle state
+                      showPrices={showPrices}
                     />
                   );
                 } else {
@@ -262,7 +264,7 @@ export default function Home() {
                       liquidity={formatVolume(market.totalLiquidity)}
                       category={market.category}
                       trending={market.trending}
-                      showPrices={showPrices} // Pass toggle state
+                      showPrices={showPrices}
                     />
                   );
                 }

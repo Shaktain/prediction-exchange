@@ -6,10 +6,11 @@ import Header from '@/components/Header';
 import Comments from '@/components/Comments';
 import { getCategoryColor } from '@/lib/utils/market-helpers';
 import { useTrade } from '@/lib/hooks/useTrade';
-import { useAccount } from 'wagmi';
+import { useAccount, useWalletClient } from 'wagmi';
 import { useTradingMode } from '@/lib/contexts/TradingModeContext';
 import OrderBook from '@/components/OrderBook';
 import PriceChart from '@/components/PriceChart';
+import { signOrder } from '@/lib/signatures/orderSigning';
 
 interface Market {
   id: number;
@@ -28,6 +29,7 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
   const { id } = use(params);
   const router = useRouter();
   const { address, isConnected } = useAccount();
+  const { data: walletClient } = useWalletClient();
   const { mode, refreshBalances } = useTradingMode();
   const [market, setMarket] = useState<Market | null>(null);
   const [marketGroupId, setMarketGroupId] = useState<number | null>(null);
@@ -102,11 +104,11 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
         if (foundMarket && foundMarket.type === 'group') {
           const option = foundMarket.options.find((opt: any) => opt.id === parseInt(id));
           if (option) {
-            setMarketGroupId(foundMarket.id); // ← ADD THIS LINE
+            setMarketGroupId(foundMarket.id);
             foundMarket = {
               id: option.id,
-              title: option.optionText, // Use optionText as title
-              description: foundMarket.description, // Use parent group description
+              title: option.optionText,
+              description: foundMarket.description,
               category: foundMarket.category,
               yesPrice: option.yesPrice,
               noPrice: option.noPrice,
@@ -178,22 +180,14 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
       noMid: '-'
     };
     
-    // Best YES bid (highest buy price)
     const yesBestBid = orderBookData.yesBids?.[0]?.price;
-    // Best YES ask (lowest sell price)
     const yesBestAsk = orderBookData.yesAsks?.[orderBookData.yesAsks.length - 1]?.price;
-    
-    // Best NO bid (highest buy price)
     const noBestBid = orderBookData.noBids?.[0]?.price;
-    // Best NO ask (lowest sell price)
     const noBestAsk = orderBookData.noAsks?.[orderBookData.noAsks.length - 1]?.price;
     
-    // If buying: show ask (what you pay)
-    // If selling: show bid (what you receive)
     const yesPrice = tradeType === 'buy' ? yesBestAsk : yesBestBid;
     const noPrice = tradeType === 'buy' ? noBestAsk : noBestBid;
     
-    // Midpoint for probability
     const yesMid = yesBestBid && yesBestAsk ? ((yesBestBid + yesBestAsk) / 2) : (yesBestBid || yesBestAsk || null);
     const noMid = noBestBid && noBestAsk ? ((noBestBid + noBestAsk) / 2) : (noBestBid || noBestAsk || null);
     
@@ -249,6 +243,11 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
       return;
     }
 
+    if (!walletClient) {
+      setError('Wallet client not ready');
+      return;
+    }
+
     if (!validateTradeInputs()) return;
 
     const shares = parseFloat(amount);
@@ -259,6 +258,37 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
 
     try {
       const { userId } = await registerUser();
+
+      // ⭐ NEW: Generate signature
+      let signature = null;
+      let expiration = null;
+      let nonce = null;
+
+      // Only require signature for real money mode
+      if (mode === 'real') {
+        try {
+          const orderData = {
+            marketId: market!.id,
+            side,
+            direction: 'buy' as const,
+            price,
+            quantity: shares,
+          };
+
+          // This now returns { signature, expiration, nonce }
+          const signedOrder = await signOrder(walletClient, orderData);
+          signature = signedOrder.signature;
+          expiration = signedOrder.expiration;
+          nonce = signedOrder.nonce;
+        } catch (signError: any) {
+          if (signError.message.includes('User rejected')) {
+            setError('Signature rejected. Please approve the signature to place your order.');
+          } else {
+            setError('Failed to sign order: ' + signError.message);
+          }
+          return;
+        }
+      }
 
       const orderResponse = await fetch('/api/orders', {
         method: 'POST',
@@ -271,7 +301,12 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
           type: orderType,
           price,
           quantity: shares,
-          mode
+          mode,
+          // Include signature fields
+          signature,
+          expiration,
+          nonce,
+          userAddress: address,
         })
       });
 
@@ -283,7 +318,6 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
       setAmount('');
       setLimitPrice('');
       
-      // Refresh balances to update locked amounts in header
       await refreshBalances();
       
     } catch (err: any) {
@@ -301,6 +335,11 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
       return;
     }
 
+    if (!walletClient) {
+      setError('Wallet client not ready');
+      return;
+    }
+
     if (!validateTradeInputs()) return;
 
     const shares = parseFloat(amount);
@@ -311,6 +350,35 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
 
     try {
       const { userId } = await registerUser();
+
+      // ⭐ NEW: Generate signature
+      let signature = null;
+      let expiration = null;
+      let nonce = null;
+
+      // Only require signature for real money mode
+      if (mode === 'real') {
+        try {
+          const orderData = {
+            marketId: market!.id,
+            side,
+            direction: 'sell' as const,
+            price,
+            quantity: shares,
+          };
+
+          signature = await signOrder(walletClient, orderData);
+          expiration = Math.floor(Date.now() / 1000) + 86400; // 24 hours
+          nonce = Date.now();
+        } catch (signError: any) {
+          if (signError.message.includes('User rejected')) {
+            setError('Signature rejected. Please approve the signature to place your order.');
+          } else {
+            setError('Failed to sign order: ' + signError.message);
+          }
+          return;
+        }
+      }
 
       const orderResponse = await fetch('/api/orders', {
         method: 'POST',
@@ -323,7 +391,12 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
           type: orderType,
           price,
           quantity: shares,
-          mode
+          mode,
+          // Include signature fields
+          signature,
+          expiration,
+          nonce,
+          userAddress: address,
         })
       });
 
@@ -335,7 +408,6 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
       setAmount('');
       setLimitPrice('');
       
-      // Refresh balances to update locked amounts in header
       await refreshBalances();
       
     } catch (err: any) {
@@ -472,7 +544,6 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
 
             <PriceChart marketId={market.id} side={side} />
 
-            {/* Order Book */}
             <OrderBook marketId={market.id} />
           </div>
 
@@ -725,6 +796,12 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
                   : 'Sell shares to receive cash now, with obligation to pay if you\'re wrong'
                 }
               </p>
+              
+              {mode === 'real' && (
+                <p className="text-xs text-blue-600 text-center mt-2 font-semibold">
+                  🔐 You'll be asked to sign this order with your wallet
+                </p>
+              )}
             </div>
           </div>
         </div>

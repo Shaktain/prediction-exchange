@@ -8,35 +8,27 @@ datasource db {
 }
 
 model User {
-  id                  String       @id @default(cuid())
-  email               String?      @unique
-  walletAddress       String       @unique
-  username            String?      @unique @db.VarChar(30)
-  passwordHash        String?
-  
-  // Real Trading (USDC)
-  usdcBalance         Decimal      @default(0) @db.Decimal(18, 6)
-  realLockedBalance   Decimal      @default(0) @db.Decimal(18, 6)
-  
-  // Demo Trading
-  demoBalance         Decimal      @default(10000) @db.Decimal(18, 6)
-  demoLockedBalance   Decimal      @default(0) @db.Decimal(18, 6)
-  
-  // Legacy
-  lockedBalance       Decimal      @default(0) @db.Decimal(18, 6)
-  fiatBalance         Decimal      @default(0) @db.Decimal(18, 6)
-  
-  kycStatus           String       @default("pending")
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
-  
-  orders              Order[]
-  positions           Position[]
-  transactions        Transaction[]
-  buyerTrades         Trade[]      @relation("BuyerTrades")
-  sellerTrades        Trade[]      @relation("SellerTrades")
-  comments            Comment[]
-  
+  id                String        @id @default(cuid())
+  email             String?       @unique
+  walletAddress     String        @unique
+  passwordHash      String?
+  usdcBalance       Decimal       @default(0) @db.Decimal(18, 6)
+  lockedBalance     Decimal       @default(0) @db.Decimal(18, 6)
+  fiatBalance       Decimal       @default(0) @db.Decimal(18, 6)
+  kycStatus         String        @default("pending")
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  demoBalance       Decimal       @default(10000) @db.Decimal(18, 6)
+  demoLockedBalance Decimal       @default(0) @db.Decimal(18, 6)
+  realLockedBalance Decimal       @default(0) @db.Decimal(18, 6)
+  username          String?       @unique @db.VarChar(30)
+  comments          Comment[]
+  orders            Order[]
+  positions         Position[]
+  buyerTrades       Trade[]       @relation("BuyerTrades")
+  sellerTrades      Trade[]       @relation("SellerTrades")
+  transactions      Transaction[]
+
   @@index([username])
 }
 
@@ -48,115 +40,110 @@ model MarketGroup {
   thumbnail   String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
-  
+  comments    Comment[]
   markets     Market[]
-  comments    Comment[]  // ← ADDED for comments on market groups
-  
+
   @@index([category, createdAt])
 }
 
 model Market {
-  id              Int       @id @default(autoincrement())
-  
-  // Link to parent question (optional - for multi-option markets)
-  marketGroupId   Int?
-  marketGroup     MarketGroup? @relation(fields: [marketGroupId], references: [id])
-  
-  // For standalone markets, use title. For grouped markets, use optionText
-  title           String?   @db.VarChar(100)
-  optionText      String?   @db.VarChar(50)
-  
+  id              Int            @id @default(autoincrement())
+  title           String?        @db.VarChar(100)
   description     String
   category        String
-  status          String    @default("active")
-  resolved        Boolean   @default(false)
+  status          String         @default("active")
+  resolved        Boolean        @default(false)
   outcome         Boolean?
   yesPrice        Decimal
   noPrice         Decimal
-  totalVolume     Decimal   @default(0)
-  volume24h       Decimal   @default(0)
-  totalLiquidity  Decimal   @default(0)
-  traderCount     Int       @default(0)
-  createdAt       DateTime  @default(now())
+  totalVolume     Decimal        @default(0)
+  totalLiquidity  Decimal        @default(0)
+  traderCount     Int            @default(0)
+  createdAt       DateTime       @default(now())
   endDate         DateTime
   resolvedAt      DateTime?
   contractAddress String?
-  
+  marketGroupId   Int?
+  optionText      String?        @db.VarChar(50)
+  volume24h       Decimal        @default(0)
+  comments        Comment[]
+  marketGroup     MarketGroup?   @relation(fields: [marketGroupId], references: [id])
   orders          Order[]
   positions       Position[]
-  trades          Trade[]
   priceHistory    PriceHistory[]
-  comments        Comment[]
-  
+  trades          Trade[]
+
   @@index([marketGroupId, createdAt])
   @@index([category, status, volume24h])
 }
 
 model Order {
-  id          String   @id @default(cuid())
-  userId      String
-  marketId    Int
-  side        String   // 'yes' or 'no'
-  direction   String   // 'buy' or 'sell'
-  type        String   // 'market' or 'limit'
-  price       Decimal  @db.Decimal(18, 6)
-  quantity    Decimal  @db.Decimal(18, 6)
-  filled      Decimal  @default(0) @db.Decimal(18, 6)
-  remaining   Decimal  @db.Decimal(18, 6)
-  status      String   // 'open', 'partial', 'filled', 'cancelled'
-  mode        String   @default("demo") // 'demo' or 'real'
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  user        User     @relation(fields: [userId], references: [id])
-  market      Market   @relation(fields: [marketId], references: [id])
-  
+  id         String    @id @default(cuid())
+  userId     String
+  marketId   Int
+  side       String
+  direction  String
+  type       String
+  price      Decimal   @db.Decimal(18, 6)
+  quantity   Decimal   @db.Decimal(18, 6)
+  filled     Decimal   @default(0) @db.Decimal(18, 6)
+  remaining  Decimal   @db.Decimal(18, 6)
+  status     String
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  mode       String    @default("demo")
+  expiration DateTime?
+  nonce      BigInt?
+  signature  String?
+  market     Market    @relation(fields: [marketId], references: [id])
+  user       User      @relation(fields: [userId], references: [id])
+
   @@index([marketId, side, direction, status, mode])
+  @@index([signature])
+  @@index([expiration])
+  @@index([nonce])
 }
 
 model Trade {
-  id            String   @id @default(cuid())
-  marketId      Int
-  buyOrderId    String
-  sellOrderId   String
-  buyerUserId   String
-  sellerUserId  String
-  side          String
-  price         Decimal  @db.Decimal(18, 6)
-  quantity      Decimal  @db.Decimal(18, 6)
-  mode          String   @default("demo") // 'demo' or 'real'
-  executedAt    DateTime @default(now())
-  
-  market        Market   @relation(fields: [marketId], references: [id])
-  buyer         User     @relation("BuyerTrades", fields: [buyerUserId], references: [id])
-  seller        User     @relation("SellerTrades", fields: [sellerUserId], references: [id])
-  
+  id           String   @id @default(cuid())
+  marketId     Int
+  buyOrderId   String
+  sellOrderId  String
+  buyerUserId  String
+  sellerUserId String
+  side         String
+  price        Decimal  @db.Decimal(18, 6)
+  quantity     Decimal  @db.Decimal(18, 6)
+  executedAt   DateTime @default(now())
+  mode         String   @default("demo")
+  buyer        User     @relation("BuyerTrades", fields: [buyerUserId], references: [id])
+  market       Market   @relation(fields: [marketId], references: [id])
+  seller       User     @relation("SellerTrades", fields: [sellerUserId], references: [id])
+
   @@index([marketId, mode])
 }
 
 model Position {
-  id            String   @id @default(cuid())
-  userId        String
-  marketId      Int
-  mode          String   @default("demo") // 'demo' or 'real'
-  yesShares     Decimal  @default(0) @db.Decimal(18, 6)
-  noShares      Decimal  @default(0) @db.Decimal(18, 6)
-  avgYesCost    Decimal  @default(0) @db.Decimal(18, 6)
-  avgNoCost     Decimal  @default(0) @db.Decimal(18, 6)
-  realizedPnL   Decimal  @default(0) @db.Decimal(18, 6)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  
-  user          User     @relation(fields: [userId], references: [id])
-  market        Market   @relation(fields: [marketId], references: [id])
-  
+  id          String   @id @default(cuid())
+  userId      String
+  marketId    Int
+  yesShares   Decimal  @default(0) @db.Decimal(18, 6)
+  noShares    Decimal  @default(0) @db.Decimal(18, 6)
+  avgYesCost  Decimal  @default(0) @db.Decimal(18, 6)
+  avgNoCost   Decimal  @default(0) @db.Decimal(18, 6)
+  realizedPnL Decimal  @default(0) @db.Decimal(18, 6)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  mode        String   @default("demo")
+  market      Market   @relation(fields: [marketId], references: [id])
+  user        User     @relation(fields: [userId], references: [id])
+
   @@unique([userId, marketId, mode])
 }
 
 model Transaction {
   id              String    @id @default(cuid())
   userId          String
-  user            User      @relation(fields: [userId], references: [id])
   type            String
   amount          Decimal
   currency        String
@@ -167,39 +154,35 @@ model Transaction {
   metadata        Json?
   createdAt       DateTime  @default(now())
   completedAt     DateTime?
+  user            User      @relation(fields: [userId], references: [id])
 }
 
 model PriceHistory {
   id        Int      @id @default(autoincrement())
   marketId  Int
-  market    Market   @relation(fields: [marketId], references: [id])
   yesPrice  Decimal
   noPrice   Decimal
   volume    Decimal
   timestamp DateTime @default(now())
+  market    Market   @relation(fields: [marketId], references: [id])
 }
 
-// ═══════════════════════════════════════════════════════════
-// UPDATED: Comments System - Works for both Markets and Market Groups
-// ═══════════════════════════════════════════════════════════
-
 model Comment {
-  id              String    @id @default(cuid())
-  marketId        Int?      // Optional - for individual markets (standalone or within group)
-  marketGroupId   Int?      // Optional - for market group pages
-  userId          String
-  parentId        String?   // For threading/replies
-  content         String    @db.Text
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  isDeleted       Boolean   @default(false)
-  
-  user            User      @relation(fields: [userId], references: [id])
-  market          Market?   @relation(fields: [marketId], references: [id])
-  marketGroup     MarketGroup? @relation(fields: [marketGroupId], references: [id])
-  parent          Comment?  @relation("CommentReplies", fields: [parentId], references: [id])
-  replies         Comment[] @relation("CommentReplies")
-  
+  id            String       @id @default(cuid())
+  marketId      Int?
+  userId        String
+  parentId      String?
+  content       String
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  isDeleted     Boolean      @default(false)
+  marketGroupId Int?
+  marketGroup   MarketGroup? @relation(fields: [marketGroupId], references: [id])
+  market        Market?      @relation(fields: [marketId], references: [id])
+  parent        Comment?     @relation("CommentReplies", fields: [parentId], references: [id])
+  replies       Comment[]    @relation("CommentReplies")
+  user          User         @relation(fields: [userId], references: [id])
+
   @@index([marketId])
   @@index([marketGroupId])
   @@index([userId])

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getOnChainBalance } from '@/lib/blockchain/vault';
 
 export async function POST(request: NextRequest) {
   try {
@@ -34,52 +33,19 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    console.log(`  Current DB balance: ${user.usdcBalance}`);
+    const oldBalance = Number(user.usdcBalance);
+    console.log(`  Current DB balance: ${oldBalance}`);
 
-    // CRITICAL: Wait 3 seconds for transaction to be mined and propagated
-    console.log('  ⏳ Waiting 3 seconds for blockchain confirmation...');
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    // Get actual vault balance from blockchain
-    let vaultBalance;
-    let retries = 0;
-    const maxRetries = 3;
-
-    while (retries < maxRetries) {
-      try {
-        vaultBalance = await getOnChainBalance(walletAddress);
-        console.log(`  📊 Vault balance (attempt ${retries + 1}): ${vaultBalance}`);
-        
-        // Verify it makes sense (should be >= old balance)
-        if (vaultBalance >= Number(user.usdcBalance)) {
-          break; // Success!
-        } else {
-          console.log(`  ⚠️  Balance seems stale, retrying...`);
-          retries++;
-          await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-      } catch (error) {
-        console.error(`  Error reading vault balance (attempt ${retries + 1}):`, error);
-        retries++;
-        if (retries >= maxRetries) {
-          // Fallback: just add the amount
-          vaultBalance = Number(user.usdcBalance) + amount;
-          console.log(`  Using fallback calculation: ${vaultBalance}`);
-        } else {
-          await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-      }
-    }
-
-    // Update user's USDC balance to match vault
+    // ✅ Increment balance (not set to absolute value)
     const updatedUser = await prisma.user.update({
       where: { walletAddress },
       data: {
-        usdcBalance: vaultBalance
+        usdcBalance: { increment: amount }
       }
     });
 
-    console.log(`  ✅ Updated DB balance: ${user.usdcBalance} → ${updatedUser.usdcBalance}`);
+    const newBalance = Number(updatedUser.usdcBalance);
+    console.log(`  ✅ Updated DB balance: ${oldBalance} → ${newBalance}`);
 
     // Record transaction
     if (txHash) {
@@ -102,9 +68,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      oldBalance: Number(user.usdcBalance),
-      newBalance: Number(updatedUser.usdcBalance),
-      vaultBalance: vaultBalance,
+      oldBalance: oldBalance,
+      newBalance: newBalance,
+      amountAdded: amount,
       message: 'Deposit synced successfully'
     });
 

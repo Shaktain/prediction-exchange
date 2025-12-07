@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAccount } from 'wagmi';
 import Header from '@/components/Header';
 import MyOrdersSection from '@/components/MyOrdersSection';
+import DepositWithdraw from '@/components/DepositWithdraw';
 import { TrendingUp, TrendingDown, DollarSign, Zap, Shield } from 'lucide-react';
 import { useTradingMode } from '@/lib/contexts/TradingModeContext';
 
@@ -88,6 +89,13 @@ export default function PortfolioPage() {
       // Fetch orders for current mode
       const ordersResponse = await fetch(`/api/orders?userId=${userData.userId}&mode=${mode}`);
       const ordersData = await ordersResponse.json();
+
+      // ADD THIS:
+      console.log('📋 Orders fetched:', ordersData);
+      console.log('  Mode:', mode);
+      console.log('  User ID:', userData.userId);
+      console.log('  Order count:', ordersData.orders?.length);
+      
       setOrders(ordersData.orders || []);
     } catch (error) {
       console.error('Error fetching portfolio:', error);
@@ -209,6 +217,23 @@ export default function PortfolioPage() {
         </div>
 
         <h1 className="text-4xl font-bold text-gray-900 mb-8">My Portfolio</h1>
+
+        {/* Show Deposit/Withdraw ONLY in Real Mode */}
+        {mode === 'real' && (
+          <div className="mb-8">
+            <DepositWithdraw />
+          </div>
+        )}
+
+        {/* Demo Mode Info */}
+        {mode === 'demo' && (
+          <div className="mb-8 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+            <p className="text-sm text-amber-800">
+              💡 <strong>Demo Mode:</strong> You're trading with virtual funds. 
+              Switch to Real mode to trade with actual USDC.
+            </p>
+          </div>
+        )}
 
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -361,7 +386,7 @@ export default function PortfolioPage() {
           )}
         </div>
 
-        {/* My Orders Section - New Component */}
+        {/* My Orders Section */}
         <MyOrdersSection 
           orders={orders}
           onCancelOrder={handleCancelOrder}

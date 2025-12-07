@@ -91,7 +91,7 @@ export async function GET(request: NextRequest) {
       }
     });
 
-    // Filter out empty market groups
+    // Filter out empty market groups (keep this - it's fine)
     const activeMarketGroups = marketGroups.filter(group => group.markets.length > 0);
 
     // Calculate aggregate stats and price changes for each market group
@@ -109,7 +109,7 @@ export async function GET(request: NextRequest) {
             const priceChange = await calculatePriceChange(m.id);
             return {
               id: m.id,
-              optionText: m.optionText,
+              optionText: m.optionText || m.title, // Fallback to title if optionText is null
               yesPrice: Number(m.yesPrice),
               noPrice: Number(m.noPrice),
               totalVolume: Number(m.totalVolume),
@@ -129,7 +129,7 @@ export async function GET(request: NextRequest) {
           question: group.question,
           description: group.description,
           category: group.category,
-          thumbnail: group.thumbnail,
+          thumbnail: group.thumbnail || '🎯', // Default emoji if no thumbnail
           options: optionsWithChanges,
           totalVolume,
           totalVolume24h,
@@ -150,14 +150,20 @@ export async function GET(request: NextRequest) {
       return (b.totalVolume || 0) - (a.totalVolume || 0);
     });
 
+    console.log('✅ Markets API returning:', {
+      standalone: standaloneMarketsWithChanges.length,
+      groups: enrichedMarketGroups.length,
+      total: allMarkets.length
+    });
+
     return NextResponse.json({ 
       markets: allMarkets,
       count: allMarkets.length
     });
   } catch (error) {
-    console.error('Error fetching markets:', error);
+    console.error('❌ Error fetching markets:', error);
     return NextResponse.json(
-      { error: 'Failed to fetch markets' },
+      { error: 'Failed to fetch markets', details: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
     );
   }
