@@ -367,9 +367,11 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
             quantity: shares,
           };
 
-          signature = await signOrder(walletClient, orderData);
-          expiration = Math.floor(Date.now() / 1000) + 86400; // 24 hours
-          nonce = Date.now();
+          // This now returns { signature, expiration, nonce }
+          const signedOrder = await signOrder(walletClient, orderData);
+          signature = signedOrder.signature;
+          expiration = signedOrder.expiration;
+          nonce = signedOrder.nonce;
         } catch (signError: any) {
           if (signError.message.includes('User rejected')) {
             setError('Signature rejected. Please approve the signature to place your order.');

@@ -14,12 +14,13 @@ const domain = {
 
 /**
  * EIP-712 Types - Order structure
+ * MUST match contract and frontend (uint8 for side/direction)
  */
 const types = {
   Order: [
     { name: 'marketId', type: 'uint256' },
-    { name: 'side', type: 'string' },
-    { name: 'direction', type: 'string' },
+    { name: 'side', type: 'uint8' }, // ✅ Changed from 'string'
+    { name: 'direction', type: 'uint8' }, // ✅ Changed from 'string'
     { name: 'price', type: 'uint256' },
     { name: 'quantity', type: 'uint256' },
     { name: 'expiration', type: 'uint256' },
@@ -55,13 +56,13 @@ export async function verifyOrderSignature(order: {
     });
     console.log('  Expected signer:', order.userAddress);
 
-    // Convert to BigInt for EIP-712 (uint256 requires BigInt)
+    // Convert to BigInt and uint8 for EIP-712
     const message = {
       marketId: BigInt(order.marketId),
-      side: order.side,
-      direction: order.direction,
-      price: BigInt(order.price), // ✅ Use as-is
-      quantity: BigInt(order.quantity), // ✅ Use as-is
+      side: order.side === 'yes' ? 0 : 1, // ✅ Convert string to uint8
+      direction: order.direction === 'buy' ? 0 : 1, // ✅ Convert string to uint8
+      price: BigInt(order.price), // Already in wei (from API)
+      quantity: BigInt(order.quantity), // Already in wei (from API)
       expiration: BigInt(order.expiration),
       nonce: BigInt(order.nonce),
     };

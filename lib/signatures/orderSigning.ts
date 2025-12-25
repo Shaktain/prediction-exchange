@@ -10,12 +10,12 @@ const domain = {
   verifyingContract: CONTRACTS.exchange,
 } as const;
 
-// Order Types - MUST use 'string' for side and direction
+// Order Types - MUST match contract exactly (uint8 for side and direction)
 const types = {
   Order: [
     { name: 'marketId', type: 'uint256' },
-    { name: 'side', type: 'string' },
-    { name: 'direction', type: 'string' },
+    { name: 'side', type: 'uint8' },
+    { name: 'direction', type: 'uint8' },
     { name: 'price', type: 'uint256' },
     { name: 'quantity', type: 'uint256' },
     { name: 'expiration', type: 'uint256' },
@@ -48,6 +48,13 @@ export async function signOrder(
   walletClient: WalletClient,
   order: OrderData
 ): Promise<SignedOrder> {
+  
+  // 🔍 DEBUG: Check which account is being used
+  console.log('🔍 SIGNING DEBUG:');
+  console.log('  Wallet client account:', walletClient.account?.address);
+  console.log('  Wallet client type:', walletClient.account?.type);
+  console.log('  Order data:', order);
+
   // Set defaults
   const expiration = order.expiration || Math.floor(Date.now() / 1000) + 86400; // 24 hours
   const nonce = order.nonce || Date.now();
@@ -55,8 +62,8 @@ export async function signOrder(
   // Convert to the format expected by the smart contract
   const message = {
     marketId: BigInt(order.marketId),
-    side: order.side,
-    direction: order.direction,
+    side: order.side === 'yes' ? 0 : 1, // ✅ Convert to uint8 (0 = yes, 1 = no)
+    direction: order.direction === 'buy' ? 0 : 1, // ✅ Convert to uint8 (0 = buy, 1 = sell)
     price: BigInt(Math.floor(order.price * 1e6)), // Convert to 6 decimals (USDC standard)
     quantity: BigInt(Math.floor(order.quantity * 1e6)),
     expiration: BigInt(expiration),
@@ -72,13 +79,17 @@ export async function signOrder(
 
   try {
     const signature = await walletClient.signTypedData({
+      account: walletClient.account, // Explicitly pass the account
       domain,
       types,
       primaryType: 'Order',
       message,
     });
 
-    console.log('✅ Signature created:', signature);
+    // 🔍 DEBUG: Verify signature was created by correct account
+    console.log('✅ SIGNATURE CREATED:');
+    console.log('  Signature:', signature);
+    console.log('  By account:', walletClient.account?.address);
     
     return {
       signature,
@@ -100,8 +111,8 @@ export function getOrderHash(order: OrderData): string {
 
   const message = {
     marketId: BigInt(order.marketId),
-    side: order.side,
-    direction: order.direction,
+    side: order.side === 'yes' ? 0 : 1,
+    direction: order.direction === 'buy' ? 0 : 1,
     price: BigInt(Math.floor(order.price * 1e6)),
     quantity: BigInt(Math.floor(order.quantity * 1e6)),
     expiration: BigInt(expiration),

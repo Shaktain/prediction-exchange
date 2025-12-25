@@ -105,13 +105,16 @@ export class BlockchainBatchSettler {
       };
 
       console.log('✅ Batch settled on-chain:', metrics);
+      console.log('🔍 ABOUT TO RETURN:', metrics); // ADD THIS
       return metrics;
 
     } catch (error) {
       console.error('❌ Blockchain settlement error:', error);
       throw error;
     } finally {
+      console.log('🔍 FINALLY BLOCK - isProcessing:', this.isProcessing); // ADD THIS
       this.isProcessing = false;
+      console.log('🔍 FINALLY BLOCK DONE'); // ADD THIS
     }
   }
 
