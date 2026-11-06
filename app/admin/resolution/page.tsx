@@ -1,155 +1,225 @@
 'use client';
+
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import Header from '@/components/Header';
-import { ArrowLeft, CheckCircle, XCircle } from 'lucide-react';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import Link from 'next/link';
 
 interface Market {
   id: number;
-  title: string;
-  description: string;
+  question: string;
   category: string;
-  endDate: string;
+  endDate: Date;
+  volume: number;
   resolved: boolean;
-  outcome: boolean | null;
-  totalVolume: number;
-  traderCount: number;
+  resolvedOutcome?: string;
+  // For multi-option markets
+  options?: Array<{
+    id: number;
+    text: string;
+  }>;
 }
 
-export default function MarketResolutionPage() {
-  const router = useRouter();
+export default function AdminResolutionPage() {
   const [markets, setMarkets] = useState<Market[]>([]);
   const [loading, setLoading] = useState(true);
   const [resolving, setResolving] = useState<number | null>(null);
 
   useEffect(() => {
-    fetchMarkets();
+    fetchUnresolvedMarkets();
   }, []);
 
-  async function fetchMarkets() {
+  async function fetchUnresolvedMarkets() {
     try {
-      const response = await fetch('/api/markets');
+      const response = await fetch('/api/admin/unresolved-markets');
       const data = await response.json();
-      // Only show unresolved markets
-      setMarkets(data.markets.filter((m: Market) => !m.resolved));
+      setMarkets(data.markets);
     } catch (error) {
-      console.error('Error fetching markets:', error);
+      console.error('Failed to fetch markets:', error);
     } finally {
       setLoading(false);
     }
   }
 
-  async function resolveMarket(marketId: number, outcome: boolean) {
+  async function resolveMarket(marketId: number, outcome: string, optionId?: number) {
+    if (!confirm(`Are you sure you want to resolve this market as ${outcome}?`)) {
+      return;
+    }
+
     setResolving(marketId);
-    
+
     try {
-      const response = await fetch(`/api/markets/${marketId}/resolve`, {
+      // Step 1: Resolve in database
+      const dbResponse = await fetch('/api/admin/resolve-market', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ outcome })
+        body: JSON.stringify({
+          marketId: marketId.toString(),
+          outcome,
+          optionId, // For multi-option markets
+        }),
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to resolve market');
+      if (!dbResponse.ok) {
+        const error = await dbResponse.json();
+        throw new Error(error.error || 'Failed to resolve in database');
       }
 
-      // Refresh markets list
-      await fetchMarkets();
-    } catch (error) {
-      console.error('Error resolving market:', error);
-      alert('Failed to resolve market');
+      // Step 2: Resolve on-chain
+      const contractResponse = await fetch('/api/admin/resolve-contract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          marketId,
+          outcome: outcome === 'yes', // true for YES, false for NO
+        }),
+      });
+
+      if (!contractResponse.ok) {
+        const error = await contractResponse.json();
+        throw new Error(error.error || 'Failed to resolve on-chain');
+      }
+
+      const { txHash, explorerUrl } = await contractResponse.json();
+
+      alert(`Market resolved successfully!\n\nTransaction: ${explorerUrl}`);
+
+      // Refresh the list (resolved market should disappear)
+      fetchUnresolvedMarkets();
+
+    } catch (error: any) {
+      console.error('Resolution error:', error);
+      alert(`Failed to resolve market: ${error.message}`);
     } finally {
       setResolving(null);
     }
   }
 
+  if (loading) {
+    return (
+      <div className="container mx-auto p-6">
+        <div className="animate-pulse">Loading markets...</div>
+      </div>
+    );
+  }
+
+  if (markets.length === 0) {
+    return (
+      <div className="container mx-auto p-6">
+        <Link href="/admin">
+          <Button variant="ghost" className="mb-6">
+            ← Back to Admin
+          </Button>
+        </Link>
+        <Card className="p-8 text-center">
+          <p className="text-muted-foreground">No markets pending resolution</p>
+        </Card>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      <Header />
-      
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <button
-          onClick={() => router.push('/admin')}
-          className="flex items-center text-gray-600 hover:text-gray-900 mb-6 transition-colors"
-        >
-          <ArrowLeft className="w-5 h-5 mr-2" />
-          Back to Admin
-        </button>
+    <div className="container mx-auto p-6">
+      <Link href="/admin">
+        <Button variant="ghost" className="mb-6">
+          ← Back to Admin
+        </Button>
+      </Link>
 
-        <h1 className="text-4xl font-bold text-gray-900 mb-8">Resolve Markets</h1>
+      <h1 className="text-3xl font-bold mb-8">Resolve Markets</h1>
 
-        {loading ? (
-          <div className="text-center py-12">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-          </div>
-        ) : markets.length === 0 ? (
-          <div className="bg-white rounded-xl shadow-lg p-12 text-center">
-            <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">All Caught Up!</h2>
-            <p className="text-gray-600">There are no markets pending resolution.</p>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {markets.map((market) => (
-              <div key={market.id} className="bg-white rounded-xl shadow-lg p-6">
-                <div className="mb-4">
-                  <span className="px-3 py-1 bg-blue-100 text-blue-700 text-xs font-semibold rounded-full">
+      <div className="space-y-6">
+        {markets.map((market) => (
+          <Card key={market.id} className="p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700">
                     {market.category}
                   </span>
                 </div>
 
-                <h2 className="text-2xl font-bold text-gray-900 mb-3">
-                  {market.title}
-                </h2>
+                <h3 className="text-lg font-semibold mb-2">{market.question}</h3>
 
-                <p className="text-gray-600 mb-4">
-                  {market.description}
-                </p>
-
-                <div className="grid grid-cols-3 gap-4 mb-6 text-sm">
-                  <div className="bg-gray-50 rounded-lg p-3">
-                    <div className="text-gray-500 mb-1">End Date</div>
-                    <div className="font-semibold text-gray-900">
-                      {new Date(market.endDate).toLocaleDateString()}
-                    </div>
+                <div className="grid grid-cols-3 gap-4 text-sm text-muted-foreground">
+                  <div>
+                    <span className="font-medium">End Date:</span>
+                    <br />
+                    {market.endDate ? new Date(market.endDate).toLocaleDateString() : 'Invalid Date'}
                   </div>
-                  <div className="bg-gray-50 rounded-lg p-3">
-                    <div className="text-gray-500 mb-1">Volume</div>
-                    <div className="font-semibold text-gray-900">
-                      ${(Number(market.totalVolume) / 1000).toFixed(1)}K
-                    </div>
+                  <div>
+                    <span className="font-medium">Volume:</span>
+                    <br />
+                    ${(market.volume || 0).toFixed(2)}
                   </div>
-                  <div className="bg-gray-50 rounded-lg p-3">
-                    <div className="text-gray-500 mb-1">Traders</div>
-                    <div className="font-semibold text-gray-900">
-                      {market.traderCount}
-                    </div>
+                  <div>
+                    <span className="font-medium">Traders:</span>
+                    <br />
+                    TBD
                   </div>
                 </div>
 
-                <div className="flex gap-4">
-                  <button
-                    onClick={() => resolveMarket(market.id, true)}
-                    disabled={resolving === market.id}
-                    className="flex-1 flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white font-semibold py-3 px-6 rounded-lg transition"
-                  >
-                    <CheckCircle className="w-5 h-5" />
-                    {resolving === market.id ? 'Resolving...' : 'Resolve YES'}
-                  </button>
-                  <button
-                    onClick={() => resolveMarket(market.id, false)}
-                    disabled={resolving === market.id}
-                    className="flex-1 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white font-semibold py-3 px-6 rounded-lg transition"
-                  >
-                    <XCircle className="w-5 h-5" />
-                    {resolving === market.id ? 'Resolving...' : 'Resolve NO'}
-                  </button>
-                </div>
+                {/* Show options for multi-option markets */}
+                {market.options && market.options.length > 0 && (
+                  <div className="mt-4 p-4 bg-muted rounded-lg">
+                    <p className="text-sm font-medium mb-2">Available Options:</p>
+                    <ul className="space-y-1">
+                      {market.options.map((option) => (
+                        <li key={option.id} className="text-sm">
+                          • {option.text}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
-            ))}
-          </div>
-        )}
-      </main>
+
+              <div className="flex gap-2">
+                {/* For multi-option markets, show option-specific buttons */}
+                {market.options && market.options.length > 0 ? (
+                  <div className="flex flex-col gap-2">
+                    {market.options.map((option) => (
+                      <Button
+                        key={option.id}
+                        onClick={() => resolveMarket(market.id, 'yes', option.id)}
+                        disabled={resolving === market.id}
+                        className="bg-green-600 hover:bg-green-700"
+                      >
+                        {resolving === market.id ? 'Resolving...' : `✓ ${option.text}`}
+                      </Button>
+                    ))}
+                    <Button
+                      onClick={() => resolveMarket(market.id, 'no')}
+                      disabled={resolving === market.id}
+                      variant="destructive"
+                    >
+                      {resolving === market.id ? 'Resolving...' : '✗ None of Above'}
+                    </Button>
+                  </div>
+                ) : (
+                  /* For binary markets, show YES/NO buttons */
+                  <>
+                    <Button
+                      onClick={() => resolveMarket(market.id, 'yes')}
+                      disabled={resolving === market.id}
+                      className="bg-green-600 hover:bg-green-700"
+                    >
+                      {resolving === market.id ? 'Resolving...' : '✓ Resolve YES'}
+                    </Button>
+                    <Button
+                      onClick={() => resolveMarket(market.id, 'no')}
+                      disabled={resolving === market.id}
+                      variant="destructive"
+                    >
+                      {resolving === market.id ? 'Resolving...' : '✗ Resolve NO'}
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
     </div>
   );
 }

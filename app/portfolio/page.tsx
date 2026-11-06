@@ -7,6 +7,7 @@ import MyOrdersSection from '@/components/MyOrdersSection';
 import DepositWithdraw from '@/components/DepositWithdraw';
 import { TrendingUp, TrendingDown, DollarSign, Zap, Shield } from 'lucide-react';
 import { useTradingMode } from '@/lib/contexts/TradingModeContext';
+import { RedemptionCard } from '@/components/RedemptionCard';
 
 interface Position {
   id: string;
@@ -217,6 +218,10 @@ export default function PortfolioPage() {
         </div>
 
         <h1 className="text-4xl font-bold text-gray-900 mb-8">My Portfolio</h1>
+
+        <div className="mb-6">
+          <RedemptionCard />
+        </div>
 
         {/* Show Deposit/Withdraw ONLY in Real Mode */}
         {mode === 'real' && (

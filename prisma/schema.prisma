@@ -54,6 +54,7 @@ model Market {
   status          String         @default("active")
   resolved        Boolean        @default(false)
   outcome         Boolean?
+  resolvedOutcome String?        // ← ADD THIS LINE (stores "yes", "no", or option text)
   yesPrice        Decimal
   noPrice         Decimal
   totalVolume     Decimal        @default(0)
